@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>智慧农业灌溉平台</title>
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/animations.css">
+    <link rel="stylesheet" href="css/prediction.css">
+    <link rel="stylesheet" href="css/upload.css">
+</head>
+<body>
+    <!-- 顶部导航栏 -->
+    <header class="top-nav">
+        <div class="nav-left">
+            <span>智慧农业灌溉平台</span>
+        </div>
+        <div class="nav-center">
+            <button class="tab active" data-page="farm">农田视图</button>
+            <button class="tab" data-page="prediction">预测分析</button>
+        </div>
+        <div class="nav-right">
+            <span>24℃ 晴天</span>
+        </div>
+    </header>
+
+    <!-- 主内容区 - 农田视图（默认显示） -->
+    <main class="main-container" id="farmView">
+        <div class="content-area">
+            <!-- 农田网格视图 -->
+            <div class="farm-grid-container">
+                <div class="farm-grid" id="farmGrid">
+                    <!-- 农田地块将通过JS动态生成 -->
+                </div>
+            </div>
+            <!-- 视图操作按钮 -->
+            <div class="view-controls">
+                <button id="zoomIn">放大</button>
+                <button id="zoomOut">缩小</button>
+                <button id="resetView">重置视图</button>
+            </div>
+        </div>
+
+        <!-- 右侧数据面板 -->
+        <aside class="data-panel">
+            <div class="weather-card">
+                <div class="weather-icon">☀️</div>
+                <div class="weather-info">
+                    <h4>晴天</h4>
+                    <p>24°C | 湿度 45%</p>
+                    <p>风速: 3.2 km/h</p>
+                </div>
+            </div>
+
+            <div class="panel-module">
+                <h3>土壤参数</h3>
+                <div class="soil-params" id="soilParams">
+                    <p>点击农田地块查看参数</p>
+                </div>
+            </div>
+
+            <div class="panel-module">
+                <h3>灌溉状态</h3>
+                <div class="status-indicator status-pending">
+                    <div class="status-dot"></div>
+                    <span>区域1 - 等待灌溉</span>
+                </div>
+                <div class="status-indicator status-active">
+                    <div class="status-dot"></div>
+                    <span>区域2 - 正在灌溉</span>
+                </div>
+                <div class="status-indicator status-completed">
+                    <div class="status-dot"></div>
+                    <span>区域3 - 已完成</span>
+                </div>
+                    
+                <div class="progress-container">
+                    <div class="progress-label">
+                        <span>今日灌溉进度</span>
+                        <span>65%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div class="progress-fill" style="width: 65%"></div>
+                    </div>
+                </div>
+            </div>
+
+
+            <div class="panel-module">
+                <h3>灌溉统计</h3>
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-value">2.5</div>
+                        <div class="stat-label">需灌溉面积(亩)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">1.6</div>
+                        <div class="stat-label">已灌溉面积(亩)</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">3</div>
+                        <div class="stat-label">需灌溉区域</div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-value">64%</div>
+                        <div class="stat-label">完成率</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 功能按钮区域 -->
+            <div class="panel-module function-buttons">
+                <h3>分析工具</h3>
+                <div class="button-group">
+                    <button class="function-btn" id="showPrescriptionBtn">
+                        <span class="btn-icon">💧</span>
+                        <span class="btn-text">灌溉处方图</span>
+                    </button>
+                    <button class="function-btn" id="showYieldBtn">
+                        <span class="btn-icon">📈</span>
+                        <span class="btn-text">产量分布</span>
+                    </button>
+                    <button class="function-btn" id="showQualityBtn">
+                        <span class="btn-icon">⭐</span>
+                        <span class="btn-text">品质预报</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- 灌溉处方图显示区域 -->
+            <div class="panel-module display-area" id="prescriptionDisplay" style="display: none;">
+                <div class="display-header">
+                    <h3>灌溉处方图</h3>
+                    <button class="close-btn" id="closePrescriptionBtn">×</button>
+                </div>
+                <div class="display-content">
+                    <div class="farm-prescription-grid" id="farmPrescriptionGrid">
+                        <!-- 处方图将在这里动态生成 -->
+                    </div>
+                    <div class="legend" id="prescriptionLegend"></div>
+                </div>
+            </div>
+
+            <!-- 产量分布显示区域 -->
+            <div class="panel-module display-area" id="yieldDisplay" style="display: none;">
+                <div class="display-header">
+                    <h3>产量分布图</h3>
+                    <button class="close-btn" id="closeYieldBtn">×</button>
+                </div>
+                <div class="display-content">
+                    <div class="yield-map-grid" id="yieldMapGrid">
+                        <!-- 产量图将在这里动态生成 -->
+                    </div>
+                    <div class="legend" id="yieldLegend"></div>
+                </div>
+            </div>
+
+            <!-- 品质预报显示区域 -->
+            <div class="panel-module display-area" id="qualityDisplay" style="display: none;">
+                <div class="display-header">
+                    <h3>品质预报图</h3>
+                    <button class="close-btn" id="closeQualityBtn">×</button>
+                </div>
+                <div class="display-content">
+                    <div class="quality-map-grid" id="qualityMapGrid">
+                        <!-- 品质图将在这里动态生成 -->
+                    </div>
+                    <div class="legend" id="qualityLegend"></div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- 预测分析视图 -->
+    <main class="main-container" id="predictionView" style="display: none;">
+        <div class="content-area">
+            <!-- 预测控制面板 -->
+            <div class="prediction-controls">
+                <div class="control-group">
+                    <label for="modelSelect">预测模型：</label>
+                    <select id="modelSelect" class="control-select">
+                        <!-- 模型选项将通过JS动态生成 -->
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="soilDepthSelect">土壤深度：</label>
+                    <select id="soilDepthSelect" class="control-select">
+                        <option value="10">10cm</option>
+                        <option value="20" selected>20cm</option>
+                        <option value="30">30cm</option>
+                        <option value="40">40cm</option>
+                    </select>
+                </div>
+                
+                <div class="control-group">
+                    <label for="predictionDateInput">预测日期：</label>
+                    <input type="date" id="predictionDateInput" class="control-select" 
+                           value="2024-05-15">
+                </div>
+                <div class="control-group">
+                    <label for="predictionTimeInput">预测时间：</label>
+                    <input type="time" id="predictionTimeInput" class="control-select" 
+                           value="14:00">
+                </div>
+                
+                <button id="runPrediction" class="prediction-btn">运行预测</button>
+                <button id="resetPrediction" class="prediction-btn secondary">重置</button>
+            </div>
+
+            <!-- 文件上传区域（只在预测页面显示） -->
+            <div class="upload-area">
+                <div class="upload-header">
+                    <h3>数据源选择</h3>
+                    <div class="upload-toggle" id="uploadToggle">
+                        <span>使用内置数据</span>
+                        <div class="toggle-switch">
+                            <div class="toggle-knob"></div>
+                        </div>
+                        <span>上传文件</span>
+                    </div>
+                </div>
+                
+                <!-- 内置数据选择 -->
+                <div class="builtin-data active" id="builtinData">
+                    <p>选择内置数据集：</p>
+                    <div class="data-options">
+                        <div class="data-option active" data-source="summer2023">
+                            <div class="data-name">夏季数据集 (2023)</div>
+                            <div class="data-desc">7-9月农田数据</div>
+                        </div>
+                        <div class="data-option" data-source="spring2024">
+                            <div class="data-name">春季数据集 (2024)</div>
+                            <div class="data-desc">3-5月农田数据</div>
+                        </div>
+                        <div class="data-option" data-source="winter2023">
+                            <div class="data-name">冬季数据集 (2023)</div>
+                            <div class="data-desc">12-2月农田数据</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- 文件上传区域 -->
+                <div class="upload-container" id="uploadContainer">
+                    <div class="upload-zone" id="uploadZone">
+                        <div class="upload-icon">📁</div>
+                        <p>拖放文件到此处，或点击选择文件</p>
+                        <p class="upload-hint">支持 CSV、Excel、JSON 格式，最大 10MB</p>
+                    </div>
+                    
+                    <div class="upload-options">
+                        <button class="file-select-btn" id="selectFileBtn">选择文件</button>
+                        <input type="file" id="fileInput" accept=".csv,.xlsx,.xls,.json">
+                    </div>
+                    
+                    <div class="selected-file" id="selectedFile">
+                        <div class="file-info">
+                            <div class="file-name" id="fileName">未选择文件</div>
+                            <div class="file-size" id="fileSize">-</div>
+                        </div>
+                        <button class="remove-file" id="removeFileBtn">×</button>
+                    </div>
+                    
+                    <div class="upload-status" id="uploadStatus"></div>
+                </div>
+            </div>
+
+            <!-- 预测图表区域 -->
+            <div class="prediction-chart-container">
+                <div class="chart-header">
+                    <h3>土壤湿度预测曲线</h3>
+                    <div class="chart-info">
+                        <span>模型：<span id="currentModel">LSTM</span></span>
+                        <span>深度：<span id="currentDepth">20cm</span></span>
+                        <span>时间：<span id="currentTime">14:00</span></span>
+                    </div>
+                </div>
+                <div class="chart-wrapper">
+                    <canvas id="predictionChart"></canvas>
+                </div>
+                <div class="chart-legend">
+                    <div class="legend-item">
+                        <span class="legend-color historical"></span>
+                        <span>历史数据</span>
+                    </div>
+                    <div class="legend-item">
+                        <span class="legend-color predicted"></span>
+                        <span>预测数据</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 右侧预测信息面板 -->
+        <aside class="data-panel">
+            <div class="panel-module">
+                <h3>预测设置</h3>
+                <div class="setting-info">
+                    <div class="setting-item">
+                        <span class="setting-label">当前模型：</span>
+                        <span class="setting-value" id="panelModel">LSTM</span>
+                    </div>
+                    <div class="setting-item">
+                        <span class="setting-label">土壤深度：</span>
+                        <span class="setting-value" id="panelDepth">20cm</span>
+                    </div>
+                    <div class="setting-item">
+                        <span class="setting-label">预测时间：</span>
+                        <span class="setting-value" id="panelTime">14:00</span>
+                    </div>
+                    <div class="setting-item">
+                        <span class="setting-label">预测状态：</span>
+                        <span class="setting-value status-ready">准备就绪</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-module">
+                <h3>模型信息</h3>
+                <div class="model-info">
+                    <div class="info-item">
+                        <span class="info-label">模型类型：</span>
+                        <span class="info-value" id="modelType">循环神经网络</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">训练时间：</span>
+                        <span class="info-value" id="trainTime">2024-01-15</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">准确率：</span>
+                        <span class="info-value" id="modelAccuracy">92.5%</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="info-label">数据来源：</span>
+                        <span class="info-value" id="dataSource">传感器网络</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-module prediction-stats-card">
+                <h3>预测统计</h3>
+                <div class="prediction-stats-grid">
+                    <div class="stat-row time-info">
+                        <div class="stat-item">
+                            <div class="stat-label">预测日期</div>
+                            <div class="stat-value large" id="fullPredictionDate">2024/05/15</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">精确时间</div>
+                            <div class="stat-value large" id="fullExactTime">14:00</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-row humidity-info">
+                        <div class="stat-item">
+                            <div class="stat-label">当前湿度</div>
+                            <div class="stat-value">40%</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">最低湿度</div>
+                            <div class="stat-value">35%</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">最高湿度</div>
+                            <div class="stat-value">78%</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-row soil-info">
+                        <div class="stat-item">
+                            <div class="stat-label">土壤温度</div>
+                            <div class="stat-value">22°C</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">pH值</div>
+                            <div class="stat-value">6.8</div>
+                        </div>
+                        <div class="stat-item">
+                            <div class="stat-label">需水量</div>
+                            <div class="stat-value">15.5m³</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="panel-module">
+                <h3>预测建议</h3>
+                <div class="prediction-suggestion">
+                    <div class="suggestion-item">
+                        <div class="suggestion-icon">⏰</div>
+                        <div class="suggestion-content">
+                            <div class="suggestion-title">最佳灌溉时间</div>
+                            <div class="suggestion-desc">
+                                建议在 
+                                <span class="optimal-date" id="optimalDate">2024/05/15</span>
+                                <span class="optimal-time" id="optimalTime">14:00</span> 
+                                进行灌溉，
+                                预计需水量为 <span class="water-amount" id="waterAmount">15m³</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="suggestion-item">
+                        <div class="suggestion-icon">📊</div>
+                        <div class="suggestion-content">
+                            <div class="suggestion-title">预测依据</div>
+                            <div class="suggestion-desc" id="predictionReason">
+                                此时温度适宜（24°C），光照适中，水分蒸发率较低
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- 引入Chart.js用于显示预测曲线 -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,134 @@
+/* 需灌溉地块闪烁动画 */
+@keyframes irrigationBlink {
+    0%, 100% { 
+        opacity: 0.8;
+        box-shadow: 
+            0 4px 8px rgba(244, 67, 54, 0.3),
+            inset 0 1px 0 rgba(255,255,255,0.5);
+    }
+    50% { 
+        opacity: 1;
+        box-shadow: 
+            0 4px 12px rgba(244, 67, 54, 0.6),
+            inset 0 1px 0 rgba(255,255,255,0.5);
+    }
+}
+
+.need-irrigation {
+    animation: irrigationBlink 2s ease-in-out infinite !important;
+}
+
+.need-irrigation::before {
+    content: "需灌溉";
+    position: absolute;
+    top: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #f44336;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 10;
+}
+
+/* 状态指示器动画 */
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.status-pending .status-dot {
+    animation: pulse 1.5s infinite;
+}
+
+.status-active .status-dot {
+    animation: pulse 1s infinite;
+}
+
+/* 地块点击动画 */
+@keyframes plotClick {
+    0% { transform: translateY(-5px) translateZ(10px) scale(1); }
+    50% { transform: translateY(-5px) translateZ(10px) scale(1.1); }
+    100% { transform: translateY(-5px) translateZ(10px) scale(1); }
+}
+
+.farm-plot:active {
+    animation: plotClick 0.3s ease;
+}
+
+/* 灌溉中地块样式 */
+.irrigating {
+    border-color: rgba(33, 150, 243, 0.8) !important;
+    background-color: rgba(33, 150, 243, 0.15) !important;
+    animation: none;
+    transition: all 0.5s ease;
+}
+
+.irrigating::before {
+    content: "灌溉中";
+    position: absolute;
+    top: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #2196f3;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 10;
+}
+
+/* 已完成地块样式 */
+.completed {
+    border-color: rgba(76, 175, 80, 0.5) !important;
+    background-color: rgba(76, 175, 80, 0.1) !important;
+    animation: none;
+}
+
+.completed::before {
+    content: "已完成";
+    position: absolute;
+    top: -30px;
+    left: 50%;
+    transform: translateX(-50%);
+    background: #4caf50;
+    color: white;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    white-space: nowrap;
+    z-index: 10;
+}
+
+/* 功能按钮动画 */
+@keyframes buttonGlow {
+    0%, 100% { 
+        box-shadow: 0 2px 5px rgba(76, 175, 80, 0.2);
+    }
+    50% { 
+        box-shadow: 0 2px 10px rgba(76, 175, 80, 0.4);
+    }
+}
+
+.function-btn:hover {
+    animation: buttonGlow 1.5s ease-in-out infinite;
+}
+
+/* 显示区域出现动画 */
+@keyframes slideIn {
+    from { 
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to { 
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+.display-area {
+    animation: slideIn 0.3s ease;
+}
