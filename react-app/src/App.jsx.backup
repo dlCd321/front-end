@@ -1,0 +1,1685 @@
+import { useEffect, useMemo, useRef, useState } from 'react';
+import Chart from 'chart.js/auto';
+import { jsPDF } from 'jspdf';
+
+const MODEL_LIST = [
+    { id: 'lstm', name: 'LSTM', type: '循环神经网络' },
+    { id: 'lstm-attention', name: 'LSTM-Attention', type: '注意力机制模型' },
+    { id: 'gru', name: 'GRU', type: '门控循环单元' },
+    { id: 'bilstm', name: 'BiLSTM', type: '双向循环神经网络' }
+];
+
+const MODEL_INFO = {
+    'lstm': { accuracy: '92.5%', trainTime: '2024-01-15', source: '传感器网络' },
+    'lstm-attention': { accuracy: '95.1%', trainTime: '2024-01-15', source: '注意力加权数据' },
+    'gru': { accuracy: '93.2%', trainTime: '2024-01-14', source: '时序序列数据' },
+    'bilstm': { accuracy: '94.2%', trainTime: '2024-01-14', source: '双向时序数据' }
+};
+
+const BUILTIN_DATASETS = {
+    summer2021: {
+        name: '夏季数据集 (2021)',
+        description: '7-9月农田数据',
+        data: [40, 38, 36, 35],
+        humidityRange: { min: 35, max: 85 },
+        dateRange: '2021-07-01 至 2021-09-30'
+    },
+    winter2021: {
+        name: '冬季数据集 (2021-2022)',
+        description: '12-2月农田数据',
+        data: [32, 30, 31, 33],
+        humidityRange: { min: 30, max: 65 },
+        dateRange: '2021-12-01 至 2022-02-28'
+    },
+    spring2022: {
+        name: '春季数据集 (2022)',
+        description: '3-5月农田数据',
+        data: [43, 40, 38, 36],
+        humidityRange: { min: 36, max: 75 },
+        dateRange: '2022-03-01 至 2022-05-31'
+    }
+};
+
+const FARM_PLOTS = Array.from({ length: 20 }, (_, i) => (i + 1).toString());
+
+const SOIL_PARAMS = {
+    '1': { temperature: 22.5, humidity: 85, deficiency: 15 },
+    '2': { temperature: 23.1, humidity: 65, deficiency: 35 },
+    '3': { temperature: 21.8, humidity: 70, deficiency: 30 },
+    '4': { temperature: 22.9, humidity: 60, deficiency: 40 },
+    '5': { temperature: 23.5, humidity: 55, deficiency: 45 },
+    '6': { temperature: 22.2, humidity: 75, deficiency: 25 },
+    '7': { temperature: 21.5, humidity: 80, deficiency: 20 },
+    '8': { temperature: 23.8, humidity: 30, deficiency: 70 },
+    '9': { temperature: 22.1, humidity: 50, deficiency: 50 },
+    '10': { temperature: 23.2, humidity: 65, deficiency: 35 },
+    '11': { temperature: 21.9, humidity: 72, deficiency: 28 },
+    '12': { temperature: 22.7, humidity: 68, deficiency: 32 },
+    '13': { temperature: 23.4, humidity: 58, deficiency: 42 },
+    '14': { temperature: 22.0, humidity: 63, deficiency: 37 },
+    '15': { temperature: 23.6, humidity: 45, deficiency: 55 },
+    '16': { temperature: 22.4, humidity: 77, deficiency: 23 },
+    '17': { temperature: 21.7, humidity: 82, deficiency: 18 },
+    '18': { temperature: 23.0, humidity: 40, deficiency: 60 },
+    '19': { temperature: 22.3, humidity: 53, deficiency: 47 },
+    '20': { temperature: 23.3, humidity: 48, deficiency: 52 }
+};
+
+const IRRIGATION_PRESCRIPTION = {
+    '1': { water: 8, fertilizer: 2.5 },
+    '2': { water: 12, fertilizer: 3.2 },
+    '3': { water: 10, fertilizer: 3.0 },
+    '4': { water: 14, fertilizer: 3.8 },
+    '5': { water: 11, fertilizer: 3.1 },
+    '6': { water: 9, fertilizer: 2.8 },
+    '7': { water: 7, fertilizer: 2.3 },
+    '8': { water: 20, fertilizer: 5.5 },
+    '9': { water: 15, fertilizer: 4.0 },
+    '10': { water: 12, fertilizer: 3.3 },
+    '11': { water: 10, fertilizer: 2.9 },
+    '12': { water: 13, fertilizer: 3.5 },
+    '13': { water: 16, fertilizer: 4.2 },
+    '14': { water: 14, fertilizer: 3.9 },
+    '15': { water: 18, fertilizer: 4.8 },
+    '16': { water: 8, fertilizer: 2.6 },
+    '17': { water: 6, fertilizer: 2.0 },
+    '18': { water: 22, fertilizer: 6.0 },
+    '19': { water: 17, fertilizer: 4.5 },
+    '20': { water: 13, fertilizer: 3.6 }
+};
+
+const YIELD_QUALITY_DATA = {
+    '1': { yield: 920, sugar: 14.5 },
+    '2': { yield: 850, sugar: 13.2 },
+    '3': { yield: 880, sugar: 13.8 },
+    '4': { yield: 810, sugar: 12.5 },
+    '5': { yield: 870, sugar: 13.5 },
+    '6': { yield: 900, sugar: 14.0 },
+    '7': { yield: 930, sugar: 14.3 },
+    '8': { yield: 680, sugar: 10.2 },
+    '9': { yield: 780, sugar: 11.8 },
+    '10': { yield: 820, sugar: 12.7 },
+    '11': { yield: 860, sugar: 13.3 },
+    '12': { yield: 840, sugar: 12.9 },
+    '13': { yield: 790, sugar: 11.9 },
+    '14': { yield: 830, sugar: 12.6 },
+    '15': { yield: 720, sugar: 10.8 },
+    '16': { yield: 910, sugar: 14.1 },
+    '17': { yield: 940, sugar: 14.4 },
+    '18': { yield: 650, sugar: 9.8 },
+    '19': { yield: 770, sugar: 11.5 },
+    '20': { yield: 800, sugar: 12.2 }
+};
+
+const DEFAULT_REASON = '此时温度适宜（24°C），光照适中，水分蒸发率较低';
+const DEFAULT_API_URL = 'http://localhost:8000/predict';
+
+function formatDateToYYYYMMDD(dateString) {
+    const date = new Date(dateString);
+    return `${date.getFullYear()}/${(date.getMonth() + 1).toString().padStart(2, '0')}/${date.getDate().toString().padStart(2, '0')}`;
+}
+
+function getColorByValue(value, min, max, colorType = 'blue') {
+    const normalized = (value - min) / (max - min || 1);
+
+    if (colorType === 'blue') {
+        if (normalized < 0.25) return '#BBDEFB';
+        if (normalized < 0.5) return '#64B5F6';
+        if (normalized < 0.75) return '#1976D2';
+        return '#0D47A1';
+    }
+    if (colorType === 'orange') {
+        if (normalized < 0.25) return '#FFE082';
+        if (normalized < 0.5) return '#FFB74D';
+        if (normalized < 0.75) return '#F57C00';
+        return '#E65100';
+    }
+    if (colorType === 'green') {
+        if (normalized < 0.25) return '#C8E6C9';
+        if (normalized < 0.5) return '#81C784';
+        if (normalized < 0.75) return '#388E3C';
+        return '#1B5E20';
+    }
+    if (colorType === 'purple') {
+        if (normalized < 0.25) return '#FFCDD2';
+        if (normalized < 0.5) return '#EF5350';
+        if (normalized < 0.75) return '#D32F2F';
+        return '#B71C1C';
+    }
+
+    return '#e3f2fd';
+}
+
+function buildSeriesFromDataset(datasetId) {
+    const dataset = BUILTIN_DATASETS[datasetId];
+    if (!dataset) {
+        return {
+            historical: [45, 43, 41, 40],
+            predicted: [40, 38, 36, 35],
+            stats: { current: 40, min: 35, max: 78 },
+            waterAmount: '15.0m³',
+            reason: DEFAULT_REASON
+        };
+    }
+
+    const baseValue = dataset.data[0];
+    const historical = [baseValue + 5, baseValue + 3, baseValue + 1, baseValue];
+    const predicted = dataset.data;
+    const waterAmount = `${((100 - baseValue) * 0.3).toFixed(1)}m³`;
+
+    return {
+        historical,
+        predicted,
+        stats: {
+            current: baseValue,
+            min: dataset.humidityRange.min,
+            max: dataset.humidityRange.max
+        },
+        waterAmount,
+        reason: `基于${dataset.name}分析，数据范围：${dataset.dateRange}`
+    };
+}
+
+function normalizePredictedSeries(predictionCurve, baseValue) {
+    if (Array.isArray(predictionCurve) && predictionCurve.length >= 4) {
+        const tail = predictionCurve.slice(-4);
+        return tail.map((value, index) => {
+            const numeric = Number(value);
+            return Number.isFinite(numeric) ? numeric : baseValue - index * 2;
+        });
+    }
+
+    return [baseValue, baseValue - 2, baseValue - 4, baseValue - 5];
+}
+
+function App() {
+    const [activeTab, setActiveTab] = useState('farm');
+    const [currentModel, setCurrentModel] = useState('lstm');
+    const [currentDepth, setCurrentDepth] = useState('20');
+    const [selectedDate, setSelectedDate] = useState('2024-05-15');
+    const [selectedTime, setSelectedTime] = useState('14:00');
+    const [predictionStatus, setPredictionStatus] = useState('ready');
+    const [currentDataSource, setCurrentDataSource] = useState('summer2021');
+    const [useUpload, setUseUpload] = useState(false);
+    const [selectedFileInfo, setSelectedFileInfo] = useState(null);
+    const [uploadedFileData, setUploadedFileData] = useState(null);
+    const [lastPredictionData, setLastPredictionData] = useState(null);
+    const [showExportOptions, setShowExportOptions] = useState(false);
+    const [showPanel, setShowPanel] = useState('');
+    const [selectedPlot, setSelectedPlot] = useState(null);
+    const [gridScale, setGridScale] = useState(0.9);
+    const [notification, setNotification] = useState(null);
+
+    const [irrigationStatus, setIrrigationStatus] = useState({
+        '1': 'pending',
+        '2': 'active',
+        '3': 'completed'
+    });
+
+    const [plotStates, setPlotStates] = useState(() => {
+        const states = {};
+        FARM_PLOTS.forEach((plotNumber) => {
+            const params = SOIL_PARAMS[plotNumber];
+            if (params && params.deficiency >= 50) {
+                states[plotNumber] = 'need-irrigation';
+            } else {
+                states[plotNumber] = 'normal';
+            }
+        });
+        return states;
+    });
+
+    const initialSeries = useMemo(() => buildSeriesFromDataset('summer2021'), []);
+    const [chartSeries, setChartSeries] = useState({
+        historical: initialSeries.historical,
+        predicted: initialSeries.predicted
+    });
+    const [humidityStats, setHumidityStats] = useState(initialSeries.stats);
+    const [waterAmount, setWaterAmount] = useState(initialSeries.waterAmount);
+    const [predictionReason, setPredictionReason] = useState(initialSeries.reason);
+    const [optimalDate, setOptimalDate] = useState(selectedDate);
+    const [optimalTime, setOptimalTime] = useState(selectedTime);
+
+    const chartRef = useRef(null);
+    const chartInstanceRef = useRef(null);
+    const fileInputRef = useRef(null);
+
+    const currentModelInfo = useMemo(() => {
+        const model = MODEL_LIST.find((item) => item.id === currentModel);
+        const info = MODEL_INFO[currentModel];
+        return {
+            name: model?.name || 'LSTM',
+            type: model?.type || '循环神经网络',
+            accuracy: info?.accuracy || '92.5%',
+            trainTime: info?.trainTime || '2024-01-15',
+            source: info?.source || '传感器网络'
+        };
+    }, [currentModel]);
+
+    useEffect(() => {
+        if (!chartRef.current) {
+            return undefined;
+        }
+
+        const ctx = chartRef.current.getContext('2d');
+        const labels = ['D-3', 'D-2', 'D-1', 'D', 'D+1', 'D+2', 'D+3'];
+
+        chartInstanceRef.current = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: '历史数据',
+                        data: [...chartSeries.historical, null, null, null],
+                        borderColor: '#4caf50',
+                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
+                        borderWidth: 3,
+                        fill: false,
+                        tension: 0.3,
+                        pointBackgroundColor: '#4caf50',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: 6,
+                        pointHoverRadius: 8,
+                        spanGaps: false,
+                        segment: {
+                            borderColor: (context) => {
+                                const index = context.p0DataIndex;
+                                return index <= 3 ? '#4caf50' : 'transparent';
+                            }
+                        }
+                    },
+                    {
+                        label: '预测数据',
+                        data: [null, null, null, ...chartSeries.predicted],
+                        borderColor: '#2196f3',
+                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
+                        borderWidth: 3,
+                        fill: false,
+                        tension: 0.3,
+                        pointBackgroundColor: '#2196f3',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2,
+                        pointRadius: 6,
+                        pointHoverRadius: 8,
+                        spanGaps: false,
+                        segment: {
+                            borderColor: (context) => {
+                                const index = context.p0DataIndex;
+                                return index >= 3 ? '#2196f3' : 'transparent';
+                            },
+                            borderDash: (context) => {
+                                const index = context.p0DataIndex;
+                                return index === 3 ? [0, 0] : [5, 5];
+                            }
+                        }
+                    }
+                ]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                scales: {
+                    y: {
+                        beginAtZero: false,
+                        min: 30,
+                        max: 50,
+                        title: {
+                            display: true,
+                            text: '土壤湿度 (%)',
+                            color: '#666',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0,0,0,0.05)'
+                        },
+                        ticks: {
+                            callback: (value) => `${value}%`
+                        }
+                    },
+                    x: {
+                        title: {
+                            display: true,
+                            text: '时间 (天)',
+                            color: '#666',
+                            font: {
+                                size: 14,
+                                weight: 'bold'
+                            }
+                        },
+                        grid: {
+                            color: 'rgba(0,0,0,0.05)'
+                        }
+                    }
+                },
+                plugins: {
+                    legend: {
+                        display: false
+                    },
+                    tooltip: {
+                        mode: 'index',
+                        intersect: false,
+                        backgroundColor: 'rgba(255,255,255,0.95)',
+                        titleColor: '#333',
+                        bodyColor: '#666',
+                        borderColor: '#ddd',
+                        borderWidth: 1,
+                        boxPadding: 10,
+                        callbacks: {
+                            label: (context) => {
+                                let label = context.dataset.label || '';
+                                if (label) {
+                                    label += ': ';
+                                }
+                                if (context.parsed.y !== null) {
+                                    label += `${context.parsed.y.toFixed(1)}%`;
+                                } else {
+                                    label += '无数据';
+                                }
+                                return label;
+                            }
+                        }
+                    }
+                },
+                interaction: {
+                    intersect: false,
+                    mode: 'nearest'
+                },
+                elements: {
+                    line: {
+                        tension: 0.3
+                    }
+                }
+            }
+        });
+
+        return () => {
+            if (chartInstanceRef.current) {
+                chartInstanceRef.current.destroy();
+                chartInstanceRef.current = null;
+            }
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!chartInstanceRef.current) {
+            return;
+        }
+
+        chartInstanceRef.current.data.datasets[0].data = [...chartSeries.historical, null, null, null];
+        chartInstanceRef.current.data.datasets[1].data = [null, null, null, ...chartSeries.predicted];
+        chartInstanceRef.current.update();
+    }, [chartSeries]);
+
+    useEffect(() => {
+        if (!useUpload) {
+            const series = buildSeriesFromDataset(currentDataSource);
+            setChartSeries({ historical: series.historical, predicted: series.predicted });
+            setHumidityStats(series.stats);
+            setWaterAmount(series.waterAmount);
+            setPredictionReason(series.reason);
+            setUploadedFileData(null);
+            setSelectedFileInfo(null);
+        }
+    }, [currentDataSource, useUpload]);
+
+    useEffect(() => {
+        setOptimalDate(selectedDate);
+        setOptimalTime(selectedTime);
+    }, [selectedDate, selectedTime]);
+
+    const showNotification = (message, type = 'success') => {
+        setNotification({ message, type });
+        setTimeout(() => {
+            setNotification(null);
+        }, 3000);
+    };
+
+    const handlePlotClick = (plotNumber) => {
+        setSelectedPlot(plotNumber);
+
+        if (plotStates[plotNumber] === 'need-irrigation') {
+            setPlotStates((prev) => ({
+                ...prev,
+                [plotNumber]: 'irrigating'
+            }));
+
+            if (irrigationStatus[plotNumber]) {
+                setIrrigationStatus((prev) => ({
+                    ...prev,
+                    [plotNumber]: 'active'
+                }));
+            }
+
+            setTimeout(() => {
+                setPlotStates((prev) => ({
+                    ...prev,
+                    [plotNumber]: 'completed'
+                }));
+
+                if (irrigationStatus[plotNumber]) {
+                    setIrrigationStatus((prev) => ({
+                        ...prev,
+                        [plotNumber]: 'completed'
+                    }));
+                }
+            }, 2000);
+        }
+    };
+
+    const handleZoomIn = () => setGridScale((prev) => prev + 0.1);
+    const handleZoomOut = () => setGridScale((prev) => (prev > 0.5 ? prev - 0.1 : prev));
+    const handleResetZoom = () => setGridScale(0.9);
+
+    const togglePanel = (panel) => {
+        setShowPanel((prev) => (prev === panel ? '' : panel));
+    };
+
+    const handleModelChange = (event) => {
+        setCurrentModel(event.target.value);
+    };
+
+    const handleDepthChange = (event) => {
+        setCurrentDepth(event.target.value);
+    };
+
+    const handleDateChange = (event) => {
+        setSelectedDate(event.target.value);
+    };
+
+    const handleTimeChange = (event) => {
+        setSelectedTime(event.target.value);
+    };
+
+    const handleDataSourceChange = (sourceId) => {
+        setCurrentDataSource(sourceId);
+    };
+
+    const handleToggleUpload = () => {
+        setUseUpload((prev) => !prev);
+    };
+
+    const resetUploadStatus = () => {
+        setSelectedFileInfo(null);
+        setUploadedFileData(null);
+        if (!useUpload) {
+            const series = buildSeriesFromDataset(currentDataSource);
+            setChartSeries({ historical: series.historical, predicted: series.predicted });
+            setHumidityStats(series.stats);
+            setWaterAmount(series.waterAmount);
+            setPredictionReason(series.reason);
+        }
+    };
+
+    const parseCSV = (content) => {
+        const lines = content.split('\n');
+        const data = [];
+
+        for (let i = 1; i < Math.min(lines.length, 8); i += 1) {
+            const values = lines[i].split(',');
+            if (values.length > 0 && values[0]) {
+                data.push(parseFloat(values[0]) || 0);
+            }
+        }
+
+        while (data.length < 4) {
+            data.push(data[data.length - 1] || 40);
+        }
+
+        const baseValue = data[3] || 40;
+        return {
+            historical: [baseValue + 5, baseValue + 3, baseValue + 1, baseValue],
+            predicted: data.slice(3, 7)
+        };
+    };
+
+    const parseJSON = (content) => {
+        const jsonData = JSON.parse(content);
+        const predictions = jsonData.predictions || jsonData.data || [];
+
+        if (predictions.length >= 4) {
+            const baseValue = predictions[0];
+            return {
+                historical: [baseValue + 5, baseValue + 3, baseValue + 1, baseValue],
+                predicted: [
+                    baseValue,
+                    predictions[1] || baseValue - 2,
+                    predictions[2] || baseValue - 4,
+                    predictions[3] || baseValue - 6
+                ]
+            };
+        }
+
+        const fallback = 40 + (content.length % 20);
+        return {
+            historical: [fallback + 5, fallback + 3, fallback + 1, fallback],
+            predicted: [fallback, fallback - 2, fallback - 4, fallback - 6]
+        };
+    };
+
+    const updateStatisticsFromUploadedData = (data) => {
+        const allData = [...data.historical, ...data.predicted];
+        const validData = allData.filter((value) => value !== null && Number.isFinite(value));
+        if (validData.length === 0) {
+            return;
+        }
+
+        const minHumidity = Math.min(...validData).toFixed(1);
+        const maxHumidity = Math.max(...validData).toFixed(1);
+        const currentHumidity = data.historical[3];
+
+        setHumidityStats({
+            current: currentHumidity,
+            min: minHumidity,
+            max: maxHumidity
+        });
+
+        setWaterAmount(`${((100 - currentHumidity) * 0.3).toFixed(1)}m³`);
+    };
+
+    const handleFiles = (file) => {
+        const validTypes = [
+            'text/csv',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/json'
+        ];
+        const validExtensions = ['.csv', '.xls', '.xlsx', '.json'];
+        const fileExtension = `.${file.name.split('.').pop().toLowerCase()}`;
+
+        if (!validTypes.includes(file.type) && !validExtensions.includes(fileExtension)) {
+            showNotification('请选择 CSV、Excel 或 JSON 格式的文件', 'error');
+            return;
+        }
+
+        if (file.size > 10 * 1024 * 1024) {
+            showNotification('文件大小不能超过 10MB', 'error');
+            return;
+        }
+
+        setSelectedFileInfo({ name: file.name, size: file.size });
+
+        const reader = new FileReader();
+        reader.onload = (event) => {
+            try {
+                const content = event.target.result;
+                let parsed;
+
+                if (file.name.endsWith('.csv')) {
+                    parsed = parseCSV(content);
+                } else if (file.name.endsWith('.json')) {
+                    parsed = parseJSON(content);
+                } else {
+                    showNotification('Excel文件解析需要额外库支持，此处仅演示', 'success');
+                    const mockBase = 40 + (file.name.length % 20);
+                    parsed = {
+                        historical: [mockBase + 5, mockBase + 3, mockBase + 1, mockBase],
+                        predicted: [mockBase, mockBase - 2, mockBase - 4, mockBase - 6]
+                    };
+                }
+
+                setUploadedFileData(parsed);
+                setChartSeries(parsed);
+                updateStatisticsFromUploadedData(parsed);
+                showNotification('文件上传成功，数据已加载', 'success');
+            } catch (error) {
+                console.error('解析文件时出错:', error);
+                showNotification('文件解析失败，请检查文件格式', 'error');
+            }
+        };
+
+        reader.onerror = () => {
+            showNotification('文件读取失败', 'error');
+        };
+
+        reader.readAsText(file, 'UTF-8');
+    };
+
+    const handleFileSelect = (event) => {
+        const file = event.target.files[0];
+        if (file) {
+            handleFiles(file);
+        }
+    };
+
+    const handleDrop = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+
+        const file = event.dataTransfer.files[0];
+        if (file) {
+            handleFiles(file);
+        }
+    };
+
+    const handlePrediction = async () => {
+        const predictionUrl = import.meta.env.VITE_PREDICTION_API_URL || DEFAULT_API_URL;
+
+        setPredictionStatus('predicting');
+
+        try {
+            const payload = {
+                model_id: currentModel,
+                soil_depth: currentDepth,
+                prediction_date: selectedDate,
+                prediction_time: selectedTime,
+                data_source: useUpload ? 'uploaded' : currentDataSource,
+                uploaded_data: uploadedFileData
+            };
+
+            const response = await fetch(predictionUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                throw new Error(`请求失败: ${response.status}`);
+            }
+
+            const result = await response.json();
+            console.log('🔍 完整响应:', result);
+
+            const data = result.data || result;
+            console.log('🔍 数据部分:', data);
+
+            const optimalTimeValue = data.optimal_time || selectedTime;
+            const optimalDateValue = data.optimal_date || selectedDate;
+            const baseValue = chartSeries.historical[3] || 40;
+            const predictionCurve = data.prediction_curve || data.predicted_values || data.prediction;
+
+            console.log('🔍 预测曲线原始数据:', predictionCurve);
+            console.log('🔍 baseValue:', baseValue);
+
+            const predictedSeries = normalizePredictedSeries(predictionCurve, baseValue);
+            console.log('🔍 处理后的预测序列:', predictedSeries);
+
+            setChartSeries({
+                historical: chartSeries.historical,
+                predicted: predictedSeries
+            });
+
+            setOptimalTime(optimalTimeValue);
+            setOptimalDate(optimalDateValue);
+            setWaterAmount(`${Number(data.water_amount || 15).toFixed(1)}m³`);
+            setPredictionReason(data.reason || DEFAULT_REASON);
+            setLastPredictionData(data);
+            setPredictionStatus('completed');
+            setShowExportOptions(true);
+            showNotification('预测完成', 'success');
+        } catch (error) {
+            console.error('预测失败:', error);
+            setPredictionStatus('ready');
+            showNotification('预测失败，请检查接口配置', 'error');
+        }
+    };
+
+    const resetPrediction = () => {
+        setCurrentModel('lstm');
+        setCurrentDepth('20');
+        setSelectedDate('2024-05-15');
+        setSelectedTime('14:00');
+        setPredictionStatus('ready');
+        setShowExportOptions(false);
+        setLastPredictionData(null);
+
+        if (!useUpload) {
+            const series = buildSeriesFromDataset(currentDataSource);
+            setChartSeries({ historical: series.historical, predicted: series.predicted });
+            setHumidityStats(series.stats);
+            setWaterAmount(series.waterAmount);
+            setPredictionReason(series.reason);
+        }
+    };
+
+    const exportAsPNG = () => {
+        if (!chartRef.current) {
+            showNotification('没有可导出的预测图表', 'error');
+            return;
+        }
+
+        const canvas = chartRef.current;
+        const link = document.createElement('a');
+        const exportCanvas = document.createElement('canvas');
+        exportCanvas.width = 1200;
+        exportCanvas.height = 800;
+        const ctx = exportCanvas.getContext('2d');
+
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+
+        ctx.fillStyle = '#2e7d32';
+        ctx.font = 'bold 28px Microsoft YaHei';
+        ctx.textAlign = 'center';
+        ctx.fillText('土壤湿度预测曲线', exportCanvas.width / 2, 60);
+
+        ctx.fillStyle = '#666';
+        ctx.font = '18px Microsoft YaHei';
+        ctx.fillText(`预测模型：${currentModelInfo.name} | 土壤深度：${currentDepth}cm | 预测时间：${formatDateToYYYYMMDD(optimalDate)} ${optimalTime}`,
+            exportCanvas.width / 2,
+            100
+        );
+
+        const chartImg = new Image();
+        chartImg.onload = () => {
+            ctx.drawImage(chartImg, 50, 150, 1100, 500);
+
+            ctx.font = '16px Microsoft YaHei';
+            ctx.fillStyle = '#999';
+            ctx.textAlign = 'left';
+            ctx.fillText(`导出时间：${new Date().toLocaleString('zh-CN')}`, 50, 700);
+            ctx.textAlign = 'right';
+            ctx.fillText('智慧农业灌溉平台', exportCanvas.width - 50, 700);
+
+            ctx.globalAlpha = 0.1;
+            ctx.font = 'bold 100px Microsoft YaHei';
+            ctx.fillStyle = '#2196f3';
+            ctx.textAlign = 'center';
+            ctx.fillText('预测报告', exportCanvas.width / 2, 400);
+            ctx.globalAlpha = 1.0;
+
+            const dataURL = exportCanvas.toDataURL('image/png');
+            link.download = `土壤湿度预测_${currentModelInfo.name}_${formatDateToYYYYMMDD(optimalDate).replace(/\//g, '-')}_${optimalTime}.png`;
+            link.href = dataURL;
+            link.click();
+
+            showNotification('PNG图片导出成功！', 'success');
+        };
+
+        chartImg.src = canvas.toDataURL('image/png', 1.0);
+    };
+
+    const exportAsPDF = () => {
+        if (!chartRef.current) {
+            showNotification('没有可导出的预测图表', 'error');
+            return;
+        }
+
+        const doc = new jsPDF();
+
+        doc.setFontSize(20);
+        doc.setTextColor(46, 125, 50);
+        doc.text('土壤湿度预测报告', 105, 20, { align: 'center' });
+
+        doc.setFontSize(12);
+        doc.setTextColor(102, 102, 102);
+        doc.text(`预测模型：${currentModelInfo.name}`, 20, 35);
+        doc.text(`土壤深度：${currentDepth}cm`, 20, 42);
+        doc.text(`预测时间：${formatDateToYYYYMMDD(optimalDate)} ${optimalTime}`, 20, 49);
+        doc.text(`建议需水量：${waterAmount}`, 20, 56);
+
+        const chartImage = chartRef.current.toDataURL('image/jpeg', 1.0);
+        doc.addImage(chartImage, 'JPEG', 20, 65, 170, 80);
+
+        doc.setFontSize(14);
+        doc.setTextColor(46, 125, 50);
+        doc.text('预测数据详情', 20, 155);
+
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        doc.text('时间点', 20, 165);
+        doc.text('历史数据 (%)', 60, 165);
+        doc.text('预测数据 (%)', 110, 165);
+        doc.text('趋势', 160, 165);
+
+        const labels = ['D-3', 'D-2', 'D-1', 'D', 'D+1', 'D+2', 'D+3'];
+        const historicalData = chartInstanceRef.current?.data.datasets[0].data || [];
+        const predictedData = chartInstanceRef.current?.data.datasets[1].data || [];
+
+        let yPos = 172;
+        labels.forEach((label, index) => {
+            const historical = historicalData[index] !== null ? Number(historicalData[index]).toFixed(1) : '--';
+            const predicted = predictedData[index] !== null ? Number(predictedData[index]).toFixed(1) : '--';
+
+            let trend = '';
+            if (index < 3) {
+                trend = historicalData[index] > historicalData[index + 1] ? '↘ 下降' : '→ 平稳';
+            } else if (index >= 3) {
+                trend = '↘ 预测下降';
+            }
+
+            doc.text(label, 20, yPos);
+            doc.text(historical, 60, yPos);
+            doc.text(predicted, 110, yPos);
+            doc.text(trend, 160, yPos);
+
+            yPos += 7;
+        });
+
+        doc.setFontSize(14);
+        doc.setTextColor(46, 125, 50);
+        doc.text('预测建议', 20, yPos + 5);
+
+        doc.setFontSize(10);
+        doc.setTextColor(0, 0, 0);
+        const splitReason = doc.splitTextToSize(predictionReason, 170);
+        doc.text(splitReason, 20, yPos + 15);
+
+        doc.setFontSize(8);
+        doc.setTextColor(153, 153, 153);
+        doc.text(`导出时间：${new Date().toLocaleString('zh-CN')}`, 20, 280);
+        doc.text('智慧农业灌溉平台', 180, 280, { align: 'right' });
+
+        doc.save(`土壤湿度预测报告_${currentModelInfo.name}_${formatDateToYYYYMMDD(optimalDate).replace(/\//g, '-')}.pdf`);
+        showNotification('PDF文件导出成功！', 'success');
+    };
+
+    const exportAsExcel = () => {
+        if (!lastPredictionData || !chartInstanceRef.current) {
+            showNotification('没有可导出的预测数据', 'error');
+            return;
+        }
+
+        let csvContent = '\uFEFF';
+        csvContent += '土壤湿度预测数据报告\r\n\r\n';
+        csvContent += `预测模型,${currentModelInfo.name}\r\n`;
+        csvContent += `土壤深度,${currentDepth}cm\r\n`;
+        csvContent += `预测日期,${formatDateToYYYYMMDD(optimalDate)}\r\n`;
+        csvContent += `预测时间,${optimalTime}\r\n`;
+        csvContent += `建议需水量,${waterAmount}\r\n`;
+        csvContent += `预测依据,${predictionReason}\r\n`;
+        csvContent += `导出时间,${new Date().toLocaleString('zh-CN')}\r\n\r\n`;
+
+        csvContent += '时间点,历史数据(%),预测数据(%),趋势分析\r\n';
+
+        const labels = ['D-3', 'D-2', 'D-1', 'D', 'D+1', 'D+2', 'D+3'];
+        const historicalData = chartInstanceRef.current.data.datasets[0].data;
+        const predictedData = chartInstanceRef.current.data.datasets[1].data;
+
+        labels.forEach((label, index) => {
+            const historical = historicalData[index] !== null ? Number(historicalData[index]).toFixed(1) : '--';
+            const predicted = predictedData[index] !== null ? Number(predictedData[index]).toFixed(1) : '--';
+
+            let trend = '';
+            if (index < 3) {
+                if (historicalData[index] > historicalData[index + 1]) {
+                    trend = '下降趋势';
+                } else if (historicalData[index] < historicalData[index + 1]) {
+                    trend = '上升趋势';
+                } else {
+                    trend = '平稳';
+                }
+            } else if (index >= 3) {
+                trend = '预测值';
+            }
+
+            csvContent += `${label},${historical},${predicted},${trend}\r\n`;
+        });
+
+        csvContent += '\r\n统计信息\r\n';
+        csvContent += '数据项,数值\r\n';
+
+        const validHistoricalData = historicalData.filter((value) => value !== null);
+        const validPredictedData = predictedData.filter((value) => value !== null);
+
+        if (validHistoricalData.length > 0) {
+            const historicalAvg = (validHistoricalData.reduce((a, b) => a + b, 0) / validHistoricalData.length).toFixed(1);
+            const historicalMin = Math.min(...validHistoricalData).toFixed(1);
+            const historicalMax = Math.max(...validHistoricalData).toFixed(1);
+
+            csvContent += `历史数据平均值,${historicalAvg}%\r\n`;
+            csvContent += `历史数据最小值,${historicalMin}%\r\n`;
+            csvContent += `历史数据最大值,${historicalMax}%\r\n`;
+        }
+
+        if (validPredictedData.length > 0) {
+            const predictedAvg = (validPredictedData.reduce((a, b) => a + b, 0) / validPredictedData.length).toFixed(1);
+            const predictedMin = Math.min(...validPredictedData).toFixed(1);
+            const predictedMax = Math.max(...validPredictedData).toFixed(1);
+
+            csvContent += `预测数据平均值,${predictedAvg}%\r\n`;
+            csvContent += `预测数据最小值,${predictedMin}%\r\n`;
+            csvContent += `预测数据最大值,${predictedMax}%\r\n`;
+        }
+
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+        const link = document.createElement('a');
+        const url = URL.createObjectURL(blob);
+
+        link.setAttribute('href', url);
+        link.setAttribute('download', `土壤湿度预测数据_${currentModelInfo.name}_${formatDateToYYYYMMDD(optimalDate).replace(/\//g, '-')}.csv`);
+        link.style.visibility = 'hidden';
+
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+
+        showNotification('Excel(CSV)文件导出成功！', 'success');
+    };
+
+    const predictionStatusText = {
+        ready: '准备就绪',
+        predicting: '预测中',
+        completed: '预测完成'
+    };
+
+    const gridTransform = `rotateX(60deg) rotateZ(-45deg) scale(${gridScale})`;
+    const soilParams = selectedPlot ? SOIL_PARAMS[selectedPlot] : null;
+    const soilDeficiencyClass = soilParams?.deficiency > 60 ? 'high-deficiency' : soilParams?.deficiency > 50 ? 'medium-deficiency' : '';
+    const soilDeficiencyText = soilParams?.deficiency > 60 ? ' (严重缺水)' : soilParams?.deficiency > 50 ? ' (缺水)' : '';
+
+    const waterValues = Object.values(IRRIGATION_PRESCRIPTION).map((item) => item.water);
+    const fertilizerValues = Object.values(IRRIGATION_PRESCRIPTION).map((item) => item.fertilizer);
+    const yieldValues = Object.values(YIELD_QUALITY_DATA).map((item) => item.yield);
+    const sugarValues = Object.values(YIELD_QUALITY_DATA).map((item) => item.sugar);
+
+    const minWater = Math.min(...waterValues);
+    const maxWater = Math.max(...waterValues);
+    const minFertilizer = Math.min(...fertilizerValues);
+    const maxFertilizer = Math.max(...fertilizerValues);
+    const minYield = Math.min(...yieldValues);
+    const maxYield = Math.max(...yieldValues);
+    const minSugar = Math.min(...sugarValues);
+    const maxSugar = Math.max(...sugarValues);
+
+    const quarter1 = minSugar + (maxSugar - minSugar) * 0.25;
+    const quarter2 = minSugar + (maxSugar - minSugar) * 0.5;
+    const quarter3 = minSugar + (maxSugar - minSugar) * 0.75;
+
+    return (
+        <div>
+            <header className="top-nav">
+                <div className="nav-left">
+                    <span>智慧农业灌溉平台</span>
+                </div>
+                <div className="nav-center">
+                    <button
+                        className={`tab ${activeTab === 'farm' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('farm')}
+                        type="button"
+                    >
+                        农田视图
+                    </button>
+                    <button
+                        className={`tab ${activeTab === 'prediction' ? 'active' : ''}`}
+                        onClick={() => setActiveTab('prediction')}
+                        type="button"
+                    >
+                        预测分析
+                    </button>
+                </div>
+                <div className="nav-right">
+                    <span>24℃ 晴天</span>
+                </div>
+            </header>
+
+            {activeTab === 'farm' && (
+                <main className="main-container" id="farmView">
+                    <div className="content-area">
+                        <div className="farm-grid-container">
+                            <div className="farm-grid" id="farmGrid" style={{ transform: gridTransform }}>
+                                {FARM_PLOTS.map((plotNumber) => (
+                                    <div
+                                        key={plotNumber}
+                                        className={`farm-plot ${plotStates[plotNumber] === 'need-irrigation' ? 'need-irrigation' : ''} ${plotStates[plotNumber] === 'irrigating' ? 'irrigating' : ''} ${plotStates[plotNumber] === 'completed' ? 'completed' : ''}`}
+                                        id={`plot-${plotNumber}`}
+                                        data-number={plotNumber}
+                                        onClick={() => handlePlotClick(plotNumber)}
+                                        role="button"
+                                        tabIndex={0}
+                                        onKeyDown={(event) => {
+                                            if (event.key === 'Enter' || event.key === ' ') {
+                                                handlePlotClick(plotNumber);
+                                            }
+                                        }}
+                                    >
+                                        <div className="plot-number">{plotNumber}</div>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="view-controls">
+                            <button id="zoomIn" onClick={handleZoomIn} type="button">放大</button>
+                            <button id="zoomOut" onClick={handleZoomOut} type="button">缩小</button>
+                            <button id="resetView" onClick={handleResetZoom} type="button">重置视图</button>
+                        </div>
+                    </div>
+
+                    <aside className="data-panel">
+                        <div className="weather-card">
+                            <div className="weather-icon">☀️</div>
+                            <div className="weather-info">
+                                <h4>晴天</h4>
+                                <p>24°C | 湿度 45%</p>
+                                <p>风速: 3.2 km/h</p>
+                            </div>
+                        </div>
+
+                        <div className="panel-module">
+                            <h3>土壤参数</h3>
+                            <div className="soil-params" id="soilParams">
+                                {!selectedPlot && <p>点击农田地块查看参数</p>}
+                                {selectedPlot && soilParams && (
+                                    <>
+                                        <div className="soil-param-item">
+                                            <div className="soil-param-label">区域 {selectedPlot}</div>
+                                        </div>
+                                        <div className="soil-param-item">
+                                            <div className="soil-param-label">土壤温度</div>
+                                            <div className="soil-param-value">{soilParams.temperature.toFixed(1)}°C</div>
+                                        </div>
+                                        <div className="soil-param-item">
+                                            <div className="soil-param-label">土壤湿度</div>
+                                            <div className="soil-param-value">{soilParams.humidity}%</div>
+                                        </div>
+                                        <div className={`soil-param-item ${soilDeficiencyClass}`}>
+                                            <div className="soil-param-label">缺水度{soilDeficiencyText}</div>
+                                            <div className="soil-param-value">{soilParams.deficiency}%</div>
+                                        </div>
+                                    </>
+                                )}
+                            </div>
+                        </div>
+
+                        <div className="panel-module">
+                            <h3>灌溉状态</h3>
+                            {['1', '2', '3'].map((plotNumber) => (
+                                <div
+                                    key={plotNumber}
+                                    className={`status-indicator status-${irrigationStatus[plotNumber] === 'pending' ? 'pending' : irrigationStatus[plotNumber] === 'active' ? 'active' : 'completed'}`}
+                                >
+                                    <div className="status-dot"></div>
+                                    <span>
+                                        区域{plotNumber} -
+                                        {irrigationStatus[plotNumber] === 'pending' && ' 等待灌溉'}
+                                        {irrigationStatus[plotNumber] === 'active' && ' 正在灌溉'}
+                                        {irrigationStatus[plotNumber] === 'completed' && ' 已完成'}
+                                    </span>
+                                </div>
+                            ))}
+
+                            <div className="progress-container">
+                                <div className="progress-label">
+                                    <span>今日灌溉进度</span>
+                                    <span>65%</span>
+                                </div>
+                                <div className="progress-bar">
+                                    <div className="progress-fill" style={{ width: '65%' }}></div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="panel-module">
+                            <h3>灌溉统计</h3>
+                            <div className="stats-grid">
+                                <div className="stat-card">
+                                    <div className="stat-value">2.5</div>
+                                    <div className="stat-label">需灌溉面积(亩)</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-value">1.6</div>
+                                    <div className="stat-label">已灌溉面积(亩)</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-value">3</div>
+                                    <div className="stat-label">需灌溉区域</div>
+                                </div>
+                                <div className="stat-card">
+                                    <div className="stat-value">64%</div>
+                                    <div className="stat-label">完成率</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="panel-module function-buttons">
+                            <h3>分析工具</h3>
+                            <div className="button-group">
+                                <button className="function-btn" onClick={() => togglePanel('prescription')} type="button">
+                                    <span className="btn-icon">💧</span>
+                                    <span className="btn-text">灌溉处方图</span>
+                                </button>
+                                <button className="function-btn" onClick={() => togglePanel('yield')} type="button">
+                                    <span className="btn-icon">📈</span>
+                                    <span className="btn-text">产量分布</span>
+                                </button>
+                                <button className="function-btn" onClick={() => togglePanel('quality')} type="button">
+                                    <span className="btn-icon">⭐</span>
+                                    <span className="btn-text">品质预报</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        {showPanel === 'prescription' && (
+                            <div className="panel-module display-area" id="prescriptionDisplay">
+                                <div className="display-header">
+                                    <h3>灌溉处方图</h3>
+                                    <button className="close-btn" onClick={() => setShowPanel('')} type="button">×</button>
+                                </div>
+                                <div className="display-content">
+                                    <div className="farm-prescription-grid" id="farmPrescriptionGrid">
+                                        {FARM_PLOTS.map((plotNumber) => {
+                                            const prescription = IRRIGATION_PRESCRIPTION[plotNumber] || { water: 10, fertilizer: 3.0 };
+                                            const waterColor = getColorByValue(prescription.water, minWater, maxWater, 'blue');
+                                            const fertilizerColor = getColorByValue(prescription.fertilizer, minFertilizer, maxFertilizer, 'orange');
+
+                                            return (
+                                                <div
+                                                    key={plotNumber}
+                                                    className="prescription-plot"
+                                                    style={{ background: `linear-gradient(135deg, ${waterColor} 50%, ${fertilizerColor} 50%)` }}
+                                                >
+                                                    <div className="plot-number">{plotNumber}</div>
+                                                    <div className="plot-info">
+                                                        <div className="plot-label">灌水量</div>
+                                                        <div className="plot-value">{prescription.water}m³</div>
+                                                        <div className="plot-label">施肥量</div>
+                                                        <div className="plot-value">{prescription.fertilizer}kg</div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="legend" id="prescriptionLegend">
+                                        <div className="legend-title">灌溉水量图例</div>
+                                        <div className="legend-content">
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#BBDEFB' }}></div>
+                                                <div className="legend-text">少量灌水</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#64B5F6' }}></div>
+                                                <div className="legend-text">中量灌水</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#1976D2' }}></div>
+                                                <div className="legend-text">大量灌水</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#0D47A1' }}></div>
+                                                <div className="legend-text">特大量灌水</div>
+                                            </div>
+                                        </div>
+                                        <div className="legend-title" style={{ marginTop: '8px' }}>施肥量图例</div>
+                                        <div className="legend-content">
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#FFE082' }}></div>
+                                                <div className="legend-text">少量施肥</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#FFB74D' }}></div>
+                                                <div className="legend-text">中量施肥</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#F57C00' }}></div>
+                                                <div className="legend-text">大量施肥</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#E65100' }}></div>
+                                                <div className="legend-text">特大量施肥</div>
+                                            </div>
+                                        </div>
+                                        <div style={{ textAlign: 'center', marginTop: '8px', color: '#666', fontSize: '10px' }}>
+                                            注：每个地块左半部分为灌水量，右半部分为施肥量
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {showPanel === 'yield' && (
+                            <div className="panel-module display-area" id="yieldDisplay">
+                                <div className="display-header">
+                                    <h3>产量分布图</h3>
+                                    <button className="close-btn" onClick={() => setShowPanel('')} type="button">×</button>
+                                </div>
+                                <div className="display-content">
+                                    <div className="yield-map-grid" id="yieldMapGrid">
+                                        {FARM_PLOTS.map((plotNumber) => {
+                                            const data = YIELD_QUALITY_DATA[plotNumber] || { yield: 800, sugar: 12.0 };
+                                            const yieldColor = getColorByValue(data.yield, minYield, maxYield, 'green');
+
+                                            return (
+                                                <div key={plotNumber} className="yield-map-plot" style={{ background: yieldColor }}>
+                                                    <div className="plot-number">{plotNumber}</div>
+                                                    <div className="plot-info">
+                                                        <div className="plot-label">产量</div>
+                                                        <div className="plot-value">{data.yield}</div>
+                                                        <div className="plot-label">kg/亩</div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="legend" id="yieldLegend">
+                                        <div className="legend-title">产量分布图例</div>
+                                        <div className="legend-content">
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#C8E6C9' }}></div>
+                                                <div className="legend-text">低产</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#81C784' }}></div>
+                                                <div className="legend-text">中低产</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#388E3C' }}></div>
+                                                <div className="legend-text">中高产</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#1B5E20' }}></div>
+                                                <div className="legend-text">高产</div>
+                                            </div>
+                                        </div>
+                                        <div style={{ textAlign: 'center', marginTop: '8px', color: '#666', fontSize: '10px' }}>
+                                            注：颜色越深表示产量越高
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {showPanel === 'quality' && (
+                            <div className="panel-module display-area" id="qualityDisplay">
+                                <div className="display-header">
+                                    <h3>品质预报图</h3>
+                                    <button className="close-btn" onClick={() => setShowPanel('')} type="button">×</button>
+                                </div>
+                                <div className="display-content">
+                                    <div className="quality-map-grid" id="qualityMapGrid">
+                                        {FARM_PLOTS.map((plotNumber) => {
+                                            const data = YIELD_QUALITY_DATA[plotNumber] || { yield: 800, sugar: 12.0 };
+                                            const sugarColor = getColorByValue(data.sugar, minSugar, maxSugar, 'purple');
+
+                                            return (
+                                                <div key={plotNumber} className="quality-map-plot" style={{ background: sugarColor }}>
+                                                    <div className="plot-number">{plotNumber}</div>
+                                                    <div className="plot-info">
+                                                        <div className="plot-label">可溶性糖</div>
+                                                        <div className="plot-value">{data.sugar.toFixed(1)}</div>
+                                                        <div className="plot-label">%</div>
+                                                    </div>
+                                                </div>
+                                            );
+                                        })}
+                                    </div>
+                                    <div className="legend" id="qualityLegend">
+                                        <div className="legend-title">糖含量分布图例</div>
+                                        <div className="legend-content">
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#FFCDD2' }}></div>
+                                                <div className="legend-text">低糖 (&lt;{quarter1.toFixed(1)}%)</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#EF5350' }}></div>
+                                                <div className="legend-text">中糖 ({quarter1.toFixed(1)}-{quarter2.toFixed(1)}%)</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#D32F2F' }}></div>
+                                                <div className="legend-text">高糖 ({quarter2.toFixed(1)}-{quarter3.toFixed(1)}%)</div>
+                                            </div>
+                                            <div className="legend-item">
+                                                <div className="legend-color" style={{ background: '#B71C1C' }}></div>
+                                                <div className="legend-text">特高糖 (≥{quarter3.toFixed(1)}%)</div>
+                                            </div>
+                                        </div>
+                                        <div style={{ textAlign: 'center', marginTop: '8px', color: '#666', fontSize: '10px' }}>
+                                            注：颜色越深表示可溶性糖含量越高
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+                    </aside>
+                </main>
+            )}
+
+            {activeTab === 'prediction' && (
+                <main className="main-container" id="predictionView">
+                    <div className="content-area">
+                        <div className="prediction-controls">
+                            <div className="control-group">
+                                <label htmlFor="modelSelect">预测模型：</label>
+                                <select
+                                    id="modelSelect"
+                                    className="control-select"
+                                    value={currentModel}
+                                    onChange={handleModelChange}
+                                >
+                                    {MODEL_LIST.map((model) => (
+                                        <option key={model.id} value={model.id}>
+                                            {model.name}
+                                        </option>
+                                    ))}
+                                </select>
+                            </div>
+
+                            <div className="control-group">
+                                <label htmlFor="soilDepthSelect">土壤深度：</label>
+                                <select
+                                    id="soilDepthSelect"
+                                    className="control-select"
+                                    value={currentDepth}
+                                    onChange={handleDepthChange}
+                                >
+                                    <option value="10">10cm</option>
+                                    <option value="20">20cm</option>
+                                    <option value="30">30cm</option>
+                                    <option value="40">40cm</option>
+                                </select>
+                            </div>
+
+                            <div className="control-group">
+                                <label htmlFor="predictionDateInput">预测日期：</label>
+                                <input
+                                    type="date"
+                                    id="predictionDateInput"
+                                    className="control-select"
+                                    value={selectedDate}
+                                    onChange={handleDateChange}
+                                />
+                            </div>
+
+                            <div className="control-group">
+                                <label htmlFor="predictionTimeInput">预测时间：</label>
+                                <input
+                                    type="time"
+                                    id="predictionTimeInput"
+                                    className="control-select"
+                                    value={selectedTime}
+                                    onChange={handleTimeChange}
+                                />
+                            </div>
+
+                            <button id="runPrediction" className="prediction-btn" onClick={handlePrediction} type="button">
+                                运行预测
+                            </button>
+                            <button id="resetPrediction" className="prediction-btn secondary" onClick={resetPrediction} type="button">
+                                重置
+                            </button>
+                        </div>
+
+                        <div className="upload-area">
+                            <div className="upload-header">
+                                <h3>数据源选择</h3>
+                                <div className="upload-toggle" id="uploadToggle" onClick={handleToggleUpload}>
+                                    <span>使用内置数据</span>
+                                    <div className={`toggle-switch ${useUpload ? 'active' : ''}`}>
+                                        <div className="toggle-knob"></div>
+                                    </div>
+                                    <span>上传文件</span>
+                                </div>
+                            </div>
+
+                            <div className={`builtin-data ${useUpload ? '' : 'active'}`} id="builtinData">
+                                <p>选择内置数据集：</p>
+                                <div className="data-options">
+                                    {Object.entries(BUILTIN_DATASETS).map(([key, dataset]) => (
+                                        <div
+                                            key={key}
+                                            className={`data-option ${currentDataSource === key ? 'active' : ''}`}
+                                            data-source={key}
+                                            onClick={() => handleDataSourceChange(key)}
+                                            role="button"
+                                            tabIndex={0}
+                                            onKeyDown={(event) => {
+                                                if (event.key === 'Enter' || event.key === ' ') {
+                                                    handleDataSourceChange(key);
+                                                }
+                                            }}
+                                        >
+                                            <div className="data-name">{dataset.name}</div>
+                                            <div className="data-desc">{dataset.description}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+
+                            <div className={`upload-container ${useUpload ? 'active' : ''}`} id="uploadContainer">
+                                <div
+                                    className="upload-zone"
+                                    id="uploadZone"
+                                    onDragEnter={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                    }}
+                                    onDragOver={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        event.currentTarget.classList.add('drag-over');
+                                    }}
+                                    onDragLeave={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        event.currentTarget.classList.remove('drag-over');
+                                    }}
+                                    onDrop={(event) => {
+                                        event.currentTarget.classList.remove('drag-over');
+                                        handleDrop(event);
+                                    }}
+                                    role="button"
+                                    tabIndex={0}
+                                    onClick={() => fileInputRef.current?.click()}
+                                    onKeyDown={(event) => {
+                                        if (event.key === 'Enter' || event.key === ' ') {
+                                            fileInputRef.current?.click();
+                                        }
+                                    }}
+                                >
+                                    <div className="upload-icon">📁</div>
+                                    <p>拖放文件到此处，或点击选择文件</p>
+                                    <p className="upload-hint">支持 CSV、Excel、JSON 格式，最大 10MB</p>
+                                </div>
+
+                                <div className="upload-options">
+                                    <button className="file-select-btn" id="selectFileBtn" onClick={() => fileInputRef.current?.click()} type="button">
+                                        选择文件
+                                    </button>
+                                    <input
+                                        type="file"
+                                        id="fileInput"
+                                        ref={fileInputRef}
+                                        accept=".csv,.xlsx,.xls,.json"
+                                        onChange={handleFileSelect}
+                                    />
+                                </div>
+
+                                <div className={`selected-file ${selectedFileInfo ? 'active' : ''}`} id="selectedFile">
+                                    <div className="file-info">
+                                        <div className="file-name" id="fileName">
+                                            {selectedFileInfo ? selectedFileInfo.name : '未选择文件'}
+                                        </div>
+                                        <div className="file-size" id="fileSize">
+                                            {selectedFileInfo ? `${(selectedFileInfo.size / 1024).toFixed(1)} KB` : '-'}
+                                        </div>
+                                    </div>
+                                    <button className="remove-file" id="removeFileBtn" onClick={resetUploadStatus} type="button">
+                                        ×
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="prediction-chart-container">
+                            <div className="chart-header">
+                                <h3>土壤湿度预测曲线</h3>
+                                <div className="chart-info">
+                                    <span>
+                                        模型：<span id="currentModel">{currentModelInfo.name}</span>
+                                    </span>
+                                    <span>
+                                        深度：<span id="currentDepth">{currentDepth}cm</span>
+                                    </span>
+                                    <span>
+                                        时间：<span id="currentTime">{selectedTime}</span>
+                                    </span>
+                                </div>
+                            </div>
+                            <div className="chart-wrapper">
+                                <canvas id="predictionChart" ref={chartRef}></canvas>
+                            </div>
+                            <div className="chart-legend">
+                                <div className="legend-item">
+                                    <span className="legend-color historical"></span>
+                                    <span>历史数据</span>
+                                </div>
+                                <div className="legend-item">
+                                    <span className="legend-color predicted"></span>
+                                    <span>预测数据</span>
+                                </div>
+                            </div>
+
+                            {showExportOptions && (
+                                <div className="export-options active" id="exportOptions">
+                                    <p style={{ margin: 0, color: '#666', fontSize: '13px' }}>导出预测结果：</p>
+                                    <button className="export-btn png" onClick={exportAsPNG} type="button">
+                                        <span>PNG</span>
+                                    </button>
+                                    <button className="export-btn pdf" onClick={exportAsPDF} type="button">
+                                        <span>PDF</span>
+                                    </button>
+                                    <button className="export-btn excel" onClick={exportAsExcel} type="button">
+                                        <span>Excel</span>
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    <aside className="data-panel">
+                        <div className="panel-module">
+                            <h3>预测设置</h3>
+                            <div className="setting-info">
+                                <div className="setting-item">
+                                    <span className="setting-label">当前模型：</span>
+                                    <span className="setting-value" id="panelModel">{currentModelInfo.name}</span>
+                                </div>
+                                <div className="setting-item">
+                                    <span className="setting-label">土壤深度：</span>
+                                    <span className="setting-value" id="panelDepth">{currentDepth}cm</span>
+                                </div>
+                                <div className="setting-item">
+                                    <span className="setting-label">预测时间：</span>
+                                    <span className="setting-value" id="panelTime">{selectedTime}</span>
+                                </div>
+                                <div className="setting-item">
+                                    <span className={`setting-value status-${predictionStatus}`}> {predictionStatusText[predictionStatus]}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="panel-module">
+                            <h3>模型信息</h3>
+                            <div className="model-info">
+                                <div className="info-item">
+                                    <span className="info-label">模型类型：</span>
+                                    <span className="info-value" id="modelType">{currentModelInfo.type}</span>
+                                </div>
+                                <div className="info-item">
+                                    <span className="info-label">训练时间：</span>
+                                    <span className="info-value" id="trainTime">{currentModelInfo.trainTime}</span>
+                                </div>
+                                <div className="info-item">
+                                    <span className="info-label">准确率：</span>
+                                    <span className="info-value" id="modelAccuracy">{currentModelInfo.accuracy}</span>
+                                </div>
+                                <div className="info-item">
+                                    <span className="info-label">数据来源：</span>
+                                    <span className="info-value" id="dataSource">{currentModelInfo.source}</span>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="panel-module prediction-stats-card">
+                            <h3>预测统计</h3>
+                            <div className="prediction-stats-grid">
+                                <div className="stat-row time-info">
+                                    <div className="stat-item">
+                                        <div className="stat-label">预测日期</div>
+                                        <div className="stat-value large" id="fullPredictionDate">{formatDateToYYYYMMDD(optimalDate)}</div>
+                                    </div>
+                                    <div className="stat-item">
+                                        <div className="stat-label">精确时间</div>
+                                        <div className="stat-value large" id="fullExactTime">{optimalTime}</div>
+                                    </div>
+                                </div>
+
+                                <div className="stat-row humidity-info">
+                                    <div className="stat-item">
+                                        <div className="stat-label">当前湿度</div>
+                                        <div className="stat-value">{Number(humidityStats.current).toFixed(1)}%</div>
+                                    </div>
+                                    <div className="stat-item">
+                                        <div className="stat-label">最低湿度</div>
+                                        <div className="stat-value">{Number(humidityStats.min).toFixed(1)}%</div>
+                                    </div>
+                                    <div className="stat-item">
+                                        <div className="stat-label">最高湿度</div>
+                                        <div className="stat-value">{Number(humidityStats.max).toFixed(1)}%</div>
+                                    </div>
+                                </div>
+
+                                <div className="stat-row soil-info">
+                                    <div className="stat-item">
+                                        <div className="stat-label">土壤温度</div>
+                                        <div className="stat-value">22°C</div>
+                                    </div>
+                                    <div className="stat-item">
+                                        <div className="stat-label">pH值</div>
+                                        <div className="stat-value">6.8</div>
+                                    </div>
+                                    <div className="stat-item">
+                                        <div className="stat-label">需水量</div>
+                                        <div className="stat-value">{waterAmount}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <div className="panel-module">
+                            <h3>预测建议</h3>
+                            <div className="prediction-suggestion">
+                                <div className="suggestion-item">
+                                    <div className="suggestion-icon">⏰</div>
+                                    <div className="suggestion-content">
+                                        <div className="suggestion-title">最佳灌溉时间</div>
+                                        <div className="suggestion-desc">
+                                            建议在
+                                            <span className="optimal-date" id="optimalDate">{formatDateToYYYYMMDD(optimalDate)}</span>
+                                            <span className="optimal-time" id="optimalTime">{optimalTime}</span>
+                                            进行灌溉，预计需水量为 <span className="water-amount" id="waterAmount">{waterAmount}</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div className="suggestion-item">
+                                    <div className="suggestion-icon">📊</div>
+                                    <div className="suggestion-content">
+                                        <div className="suggestion-title">预测依据</div>
+                                        <div className="suggestion-desc" id="predictionReason">{predictionReason}</div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </aside>
+                </main>
+            )}
+
+            {notification && (
+                <div
+                    style={{
+                        position: 'fixed',
+                        top: '20px',
+                        right: '20px',
+                        background: notification.type === 'success' ? '#4caf50' : '#f44336',
+                        color: '#ffffff',
+                        padding: '10px 16px',
+                        borderRadius: '6px',
+                        boxShadow: '0 4px 12px rgba(0,0,0,0.15)',
+                        zIndex: 1000,
+                        animation: 'slideIn 0.3s ease',
+                        fontSize: '13px'
+                    }}
+                >
+                    {notification.message}
+                </div>
+            )}
+        </div>
+    );
+}
+
+export default App;
