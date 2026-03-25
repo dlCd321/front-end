@@ -2,30 +2,155 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import Chart from 'chart.js/auto';
 import { jsPDF } from 'jspdf';
 import {
-    MODEL_LIST,
-    MODEL_INFO,
     BUILTIN_DATASETS,
-    FARM_PLOTS,
-    SOIL_PARAMS,
-    IRRIGATION_PRESCRIPTION,
-    YIELD_QUALITY_DATA,
     DEFAULT_REASON,
-    DEFAULT_API_URL
+    FARM_PLOTS,
+    IRRIGATION_PRESCRIPTION,
+    MODEL_INFO,
+    MODEL_LIST,
+    SOIL_PARAMS
 } from './constants';
 import {
-    formatDateToYYYYMMDD,
-    getColorByValue,
     buildSeriesFromDataset,
+    formatDateToYYYYMMDD,
     normalizePredictedSeries
 } from './utils';
 import { predictSoilMoisture } from './services/predictionApi';
 import AppView from './components/AppView';
 
+function getChartBounds(chartSeries) {
+    const values = [...chartSeries.historical, ...chartSeries.predicted]
+        .filter((value) => value !== null && Number.isFinite(value));
+
+    if (!values.length) {
+        return { min: 30, max: 50 };
+    }
+
+    return {
+        min: Math.floor(Math.min(...values) - 3),
+        max: Math.ceil(Math.max(...values) + 3)
+    };
+}
+
+function buildChartConfig(chartSeries) {
+    const labels = ['D-3', 'D-2', 'D-1', 'D', 'D+1', 'D+2', 'D+3'];
+    const bounds = getChartBounds(chartSeries);
+
+    return {
+        type: 'line',
+        data: {
+            labels,
+            datasets: [
+                {
+                    label: '历史数据',
+                    data: [...chartSeries.historical, null, null, null],
+                    borderColor: '#38BD7E',
+                    backgroundColor: 'rgba(56, 189, 126, 0.08)',
+                    borderWidth: 3,
+                    fill: true,
+                    pointBackgroundColor: labels.map((_, index) => (
+                        index === 3 ? '#F8FAFC' : '#38BD7E'
+                    )),
+                    pointBorderColor: labels.map((_, index) => (
+                        index === 3 ? '#38BD7E' : '#0B1120'
+                    )),
+                    pointBorderWidth: labels.map((_, index) => (index === 3 ? 2.5 : 2)),
+                    pointRadius: labels.map((_, index) => (index === 3 ? 5 : index < 4 ? 3 : 0)),
+                    pointHoverRadius: labels.map((_, index) => (index === 3 ? 6 : 4)),
+                    tension: 0.35,
+                    spanGaps: false
+                },
+                {
+                    label: '预测数据',
+                    data: [null, null, null, ...chartSeries.predicted],
+                    borderColor: '#3B82F6',
+                    backgroundColor: 'rgba(59, 130, 246, 0.06)',
+                    borderWidth: 3,
+                    borderDash: [8, 6],
+                    fill: true,
+                    pointBackgroundColor: labels.map((_, index) => (
+                        index >= 4 ? '#3B82F6' : 'transparent'
+                    )),
+                    pointBorderColor: labels.map((_, index) => (
+                        index >= 4 ? '#E2E8F0' : 'transparent'
+                    )),
+                    pointBorderWidth: labels.map((_, index) => (index >= 4 ? 2 : 0)),
+                    pointRadius: labels.map((_, index) => (index >= 4 ? 3 : 0)),
+                    pointHoverRadius: labels.map((_, index) => (index >= 4 ? 4 : 0)),
+                    tension: 0.35,
+                    spanGaps: false
+                }
+            ]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: {
+                intersect: false,
+                mode: 'index'
+            },
+            plugins: {
+                legend: {
+                    display: false
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.95)',
+                    titleColor: '#F1F5F9',
+                    bodyColor: '#94A3B8',
+                    borderColor: 'rgba(100, 116, 139, 0.2)',
+                    borderWidth: 1,
+                    callbacks: {
+                        label: (context) => {
+                            if (context.parsed.y === null) {
+                                return `${context.dataset.label}: 无数据`;
+                            }
+
+                            return `${context.dataset.label}: ${context.parsed.y.toFixed(1)}%`;
+                        }
+                    }
+                }
+            },
+            scales: {
+                y: {
+                    min: bounds.min,
+                    max: bounds.max,
+                    title: {
+                        display: true,
+                        text: '土壤湿度 (%)',
+                        color: '#94A3B8'
+                    },
+                    grid: {
+                        color: 'rgba(100, 116, 139, 0.06)'
+                    },
+                    ticks: {
+                        color: '#475569',
+                        callback: (value) => `${value}%`
+                    }
+                },
+                x: {
+                    title: {
+                        display: true,
+                        text: '时间 (天)',
+                        color: '#94A3B8'
+                    },
+                    grid: {
+                        color: 'rgba(100, 116, 139, 0.06)'
+                    },
+                    ticks: {
+                        color: '#475569'
+                    }
+                }
+            }
+        }
+    };
+}
+
 function App() {
     const [activeTab, setActiveTab] = useState('farm');
+    const [viewMode, setViewMode] = useState('status');
     const [currentModel, setCurrentModel] = useState('lstm');
     const [currentDepth, setCurrentDepth] = useState('20');
-    const [selectedDate, setSelectedDate] = useState('2021-08-15');  // ← 改为2021年夏季
+    const [selectedDate, setSelectedDate] = useState('2021-08-15');
     const [selectedTime, setSelectedTime] = useState('14:00');
     const [predictionStatus, setPredictionStatus] = useState('ready');
     const [currentDataSource, setCurrentDataSource] = useState('summer2021');
@@ -35,27 +160,27 @@ function App() {
     const [lastPredictionData, setLastPredictionData] = useState(null);
     const [showExportOptions, setShowExportOptions] = useState(false);
     const [predictionImage, setPredictionImage] = useState(null);
-    const [showPanel, setShowPanel] = useState('');
     const [selectedPlot, setSelectedPlot] = useState(null);
     const [gridScale, setGridScale] = useState(0.9);
     const [notification, setNotification] = useState(null);
 
-    const [irrigationStatus, setIrrigationStatus] = useState({
-        '1': 'pending',
-        '2': 'active',
-        '3': 'completed'
-    });
-
     const [plotStates, setPlotStates] = useState(() => {
         const states = {};
+
         FARM_PLOTS.forEach((plotNumber) => {
             const params = SOIL_PARAMS[plotNumber];
-            if (params && params.deficiency >= 50) {
+
+            if (plotNumber === '4') {
+                states[plotNumber] = 'completed';
+            } else if (plotNumber === '9') {
+                states[plotNumber] = 'irrigating';
+            } else if (params && params.deficiency >= 52) {
                 states[plotNumber] = 'need-irrigation';
             } else {
                 states[plotNumber] = 'normal';
             }
         });
+
         return states;
     });
 
@@ -73,10 +198,12 @@ function App() {
     const chartRef = useRef(null);
     const chartInstanceRef = useRef(null);
     const fileInputRef = useRef(null);
+    const hasPredictionResults = predictionStatus !== 'ready' || Boolean(lastPredictionData);
 
     const currentModelInfo = useMemo(() => {
         const model = MODEL_LIST.find((item) => item.id === currentModel);
         const info = MODEL_INFO[currentModel];
+
         return {
             name: model?.name || 'LSTM',
             type: model?.type || '循环神经网络',
@@ -86,174 +213,56 @@ function App() {
         };
     }, [currentModel]);
 
+    useEffect(() => () => {
+        if (chartInstanceRef.current) {
+            chartInstanceRef.current.destroy();
+            chartInstanceRef.current = null;
+        }
+    }, []);
+
     useEffect(() => {
-        if (!chartRef.current) {
-            return undefined;
+        if (!chartRef.current || chartInstanceRef.current || !activeTab) {
+            return;
         }
 
         const ctx = chartRef.current.getContext('2d');
-        const labels = ['D-3', 'D-2', 'D-1', 'D', 'D+1', 'D+2', 'D+3'];
-
-        chartInstanceRef.current = new Chart(ctx, {
-            type: 'line',
-            data: {
-                labels,
-                datasets: [
-                    {
-                        label: '历史数据',
-                        data: [...chartSeries.historical, null, null, null],
-                        borderColor: '#4caf50',
-                        backgroundColor: 'rgba(76, 175, 80, 0.1)',
-                        borderWidth: 3,
-                        fill: false,
-                        tension: 0.3,
-                        pointBackgroundColor: '#4caf50',
-                        pointBorderColor: '#ffffff',
-                        pointBorderWidth: 2,
-                        pointRadius: 6,
-                        pointHoverRadius: 8,
-                        spanGaps: false,
-                        segment: {
-                            borderColor: (context) => {
-                                const index = context.p0DataIndex;
-                                return index <= 3 ? '#4caf50' : 'transparent';
-                            }
-                        }
-                    },
-                    {
-                        label: '预测数据',
-                        data: [null, null, null, ...chartSeries.predicted],
-                        borderColor: '#2196f3',
-                        backgroundColor: 'rgba(33, 150, 243, 0.1)',
-                        borderWidth: 3,
-                        fill: false,
-                        tension: 0.3,
-                        pointBackgroundColor: '#2196f3',
-                        pointBorderColor: '#ffffff',
-                        pointBorderWidth: 2,
-                        pointRadius: 6,
-                        pointHoverRadius: 8,
-                        spanGaps: false,
-                        segment: {
-                            borderColor: (context) => {
-                                const index = context.p0DataIndex;
-                                return index >= 3 ? '#2196f3' : 'transparent';
-                            },
-                            borderDash: (context) => {
-                                const index = context.p0DataIndex;
-                                return index === 3 ? [0, 0] : [5, 5];
-                            }
-                        }
-                    }
-                ]
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    y: {
-                        beginAtZero: false,
-                        min: 30,
-                        max: 50,
-                        title: {
-                            display: true,
-                            text: '土壤湿度 (%)',
-                            color: '#666',
-                            font: {
-                                size: 14,
-                                weight: 'bold'
-                            }
-                        },
-                        grid: {
-                            color: 'rgba(0,0,0,0.05)'
-                        },
-                        ticks: {
-                            callback: (value) => `${value}%`
-                        }
-                    },
-                    x: {
-                        title: {
-                            display: true,
-                            text: '时间 (天)',
-                            color: '#666',
-                            font: {
-                                size: 14,
-                                weight: 'bold'
-                            }
-                        },
-                        grid: {
-                            color: 'rgba(0,0,0,0.05)'
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: false
-                    },
-                    tooltip: {
-                        mode: 'index',
-                        intersect: false,
-                        backgroundColor: 'rgba(255,255,255,0.95)',
-                        titleColor: '#333',
-                        bodyColor: '#666',
-                        borderColor: '#ddd',
-                        borderWidth: 1,
-                        boxPadding: 10,
-                        callbacks: {
-                            label: (context) => {
-                                let label = context.dataset.label || '';
-                                if (label) {
-                                    label += ': ';
-                                }
-                                if (context.parsed.y !== null) {
-                                    label += `${context.parsed.y.toFixed(1)}%`;
-                                } else {
-                                    label += '无数据';
-                                }
-                                return label;
-                            }
-                        }
-                    }
-                },
-                interaction: {
-                    intersect: false,
-                    mode: 'nearest'
-                },
-                elements: {
-                    line: {
-                        tension: 0.3
-                    }
-                }
-            }
-        });
-
-        return () => {
-            if (chartInstanceRef.current) {
-                chartInstanceRef.current.destroy();
-                chartInstanceRef.current = null;
-            }
-        };
-    }, []);
+        chartInstanceRef.current = new Chart(ctx, buildChartConfig(chartSeries));
+    }, [activeTab, chartSeries, hasPredictionResults]);
 
     useEffect(() => {
         if (!chartInstanceRef.current) {
             return;
         }
 
-        chartInstanceRef.current.data.datasets[0].data = [...chartSeries.historical, null, null, null];
-        chartInstanceRef.current.data.datasets[1].data = [null, null, null, ...chartSeries.predicted];
+        const bounds = getChartBounds(chartSeries);
+
+        chartInstanceRef.current.data.datasets[0].data = [
+            ...chartSeries.historical,
+            null,
+            null,
+            null
+        ];
+        chartInstanceRef.current.data.datasets[1].data = [
+            null,
+            null,
+            null,
+            ...chartSeries.predicted
+        ];
+        chartInstanceRef.current.options.scales.y.min = bounds.min;
+        chartInstanceRef.current.options.scales.y.max = bounds.max;
         chartInstanceRef.current.update();
     }, [chartSeries]);
 
     useEffect(() => {
         if (!useUpload) {
             const series = buildSeriesFromDataset(currentDataSource);
-            setChartSeries({ historical: series.historical, predicted: series.predicted });
+            setChartSeries({
+                historical: series.historical,
+                predicted: series.predicted
+            });
             setHumidityStats(series.stats);
             setWaterAmount(series.waterAmount);
             setPredictionReason(series.reason);
-            setUploadedFileData(null);
-            setSelectedFileInfo(null);
         }
     }, [currentDataSource, useUpload]);
 
@@ -264,50 +273,36 @@ function App() {
 
     const showNotification = (message, type = 'success') => {
         setNotification({ message, type });
-        setTimeout(() => {
+        window.setTimeout(() => {
             setNotification(null);
         }, 3000);
     };
 
     const handlePlotClick = (plotNumber) => {
         setSelectedPlot(plotNumber);
+    };
 
-        if (plotStates[plotNumber] === 'need-irrigation') {
+    const handleTriggerIrrigation = (plotNumber) => {
+        if (plotStates[plotNumber] !== 'need-irrigation') {
+            return;
+        }
+
+        setPlotStates((prev) => ({
+            ...prev,
+            [plotNumber]: 'irrigating'
+        }));
+        showNotification(`地块 #${plotNumber} 已加入灌溉队列`, 'success');
+
+        window.setTimeout(() => {
             setPlotStates((prev) => ({
                 ...prev,
-                [plotNumber]: 'irrigating'
+                [plotNumber]: 'completed'
             }));
-
-            if (irrigationStatus[plotNumber]) {
-                setIrrigationStatus((prev) => ({
-                    ...prev,
-                    [plotNumber]: 'active'
-                }));
-            }
-
-            setTimeout(() => {
-                setPlotStates((prev) => ({
-                    ...prev,
-                    [plotNumber]: 'completed'
-                }));
-
-                if (irrigationStatus[plotNumber]) {
-                    setIrrigationStatus((prev) => ({
-                        ...prev,
-                        [plotNumber]: 'completed'
-                    }));
-                }
-            }, 2000);
-        }
+        }, 2000);
     };
 
-    const handleZoomIn = () => setGridScale((prev) => prev + 0.1);
-    const handleZoomOut = () => setGridScale((prev) => (prev > 0.5 ? prev - 0.1 : prev));
-    const handleResetZoom = () => setGridScale(0.9);
-
-    const togglePanel = (panel) => {
-        setShowPanel((prev) => (prev === panel ? '' : panel));
-    };
+    const handleZoomIn = () => setGridScale((prev) => Math.min(prev + 0.1, 1.3));
+    const handleZoomOut = () => setGridScale((prev) => Math.max(prev - 0.1, 0.6));
 
     const handleModelChange = (event) => {
         setCurrentModel(event.target.value);
@@ -326,35 +321,40 @@ function App() {
     };
 
     const handleDataSourceChange = (sourceId) => {
-        setCurrentDataSource(sourceId);
-
-        // 根据数据源自动调整日期范围
         const dateMap = {
-            'summer2021': '2021-08-15',   // 夏季数据集中间日期
-            'winter2021': '2022-01-15',   // 冬季数据集中间日期
-            'spring2022': '2022-04-15'    // 春季数据集中间日期
+            summer2021: '2021-08-15',
+            winter2021: '2022-01-15',
+            spring2022: '2022-04-15'
         };
+
+        setCurrentDataSource(sourceId);
+        setUseUpload(false);
+        setSelectedFileInfo(null);
+        setUploadedFileData(null);
+
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
+        }
 
         if (dateMap[sourceId]) {
             setSelectedDate(dateMap[sourceId]);
-            console.log(`📅 数据源切换到 ${sourceId}，日期自动调整为 ${dateMap[sourceId]}`);
         }
-    };
-
-    const handleToggleUpload = () => {
-        setUseUpload((prev) => !prev);
     };
 
     const resetUploadStatus = () => {
+        setUseUpload(false);
         setSelectedFileInfo(null);
         setUploadedFileData(null);
-        if (!useUpload) {
-            const series = buildSeriesFromDataset(currentDataSource);
-            setChartSeries({ historical: series.historical, predicted: series.predicted });
-            setHumidityStats(series.stats);
-            setWaterAmount(series.waterAmount);
-            setPredictionReason(series.reason);
+
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
         }
+
+        const series = buildSeriesFromDataset(currentDataSource);
+        setChartSeries({ historical: series.historical, predicted: series.predicted });
+        setHumidityStats(series.stats);
+        setWaterAmount(series.waterAmount);
+        setPredictionReason(series.reason);
     };
 
     const parseCSV = (content) => {
@@ -364,7 +364,7 @@ function App() {
         for (let i = 1; i < Math.min(lines.length, 8); i += 1) {
             const values = lines[i].split(',');
             if (values.length > 0 && values[0]) {
-                data.push(parseFloat(values[0]) || 0);
+                data.push(Number.parseFloat(values[0]) || 0);
             }
         }
 
@@ -406,20 +406,18 @@ function App() {
     const updateStatisticsFromUploadedData = (data) => {
         const allData = [...data.historical, ...data.predicted];
         const validData = allData.filter((value) => value !== null && Number.isFinite(value));
-        if (validData.length === 0) {
+
+        if (!validData.length) {
             return;
         }
 
-        const minHumidity = Math.min(...validData).toFixed(1);
-        const maxHumidity = Math.max(...validData).toFixed(1);
         const currentHumidity = data.historical[3];
 
         setHumidityStats({
             current: currentHumidity,
-            min: minHumidity,
-            max: maxHumidity
+            min: Math.min(...validData),
+            max: Math.max(...validData)
         });
-
         setWaterAmount(`${((100 - currentHumidity) * 0.3).toFixed(1)}m³`);
     };
 
@@ -443,6 +441,7 @@ function App() {
             return;
         }
 
+        setUseUpload(true);
         setSelectedFileInfo({ name: file.name, size: file.size });
 
         const reader = new FileReader();
@@ -456,12 +455,12 @@ function App() {
                 } else if (file.name.endsWith('.json')) {
                     parsed = parseJSON(content);
                 } else {
-                    showNotification('Excel文件解析需要额外库支持，此处仅演示', 'success');
                     const mockBase = 40 + (file.name.length % 20);
                     parsed = {
                         historical: [mockBase + 5, mockBase + 3, mockBase + 1, mockBase],
                         predicted: [mockBase, mockBase - 2, mockBase - 4, mockBase - 6]
                     };
+                    showNotification('Excel 文件已加载为演示数据', 'success');
                 }
 
                 setUploadedFileData(parsed);
@@ -511,64 +510,51 @@ function App() {
                 uploaded_data: uploadedFileData
             };
 
-            // 使用 API 服务
             const result = await predictSoilMoisture(payload);
-            console.log('🔍 完整响应:', result);
-
             const data = result.data || result;
-            console.log('🔍 数据部分:', data);
-
-            // ✅ 验证后端数据签名
-            if (data.backend_signature) {
-                console.log('✅✅✅ 后端数据验证:', data.backend_signature);
-                console.log('✅ 这是真实的后端数据！');
-            }
-
             const optimalTimeValue = data.optimal_time || selectedTime;
             const optimalDateValue = data.optimal_date || selectedDate;
             const baseValue = chartSeries.historical[3] || 40;
-            const predictionCurve = data.prediction_curve || data.predicted_values || data.prediction;
-
-            console.log('🔍 预测曲线原始数据:', predictionCurve);
-            console.log('🔍 baseValue:', baseValue);
+            const predictionCurve = (
+                data.prediction_curve ||
+                data.predicted_values ||
+                data.prediction
+            );
 
             const predictedSeries = normalizePredictedSeries(predictionCurve, baseValue);
-            console.log('🔍 处理后的预测序列:', predictedSeries);
 
             setChartSeries({
                 historical: chartSeries.historical,
                 predicted: predictedSeries
             });
-
             setOptimalTime(optimalTimeValue);
             setOptimalDate(optimalDateValue);
             setWaterAmount(`${Number(data.water_amount || 15).toFixed(1)}m³`);
 
-            // 提取后端返回的图片数据
-            const imageData = data.image || data.plot_image || data.visualization || data.chart_image || data.prediction_plot;
+            const imageData = (
+                data.image ||
+                data.plot_image ||
+                data.visualization ||
+                data.chart_image ||
+                data.prediction_plot
+            );
+
             if (imageData) {
-                console.log('✅ 检测到后端返回的图片数据');
-                // 如果是 base64 编码，确保格式正确
                 if (imageData.startsWith('data:image')) {
                     setPredictionImage(imageData);
-                } else if (imageData.startsWith('http://') || imageData.startsWith('https://')) {
-                    // 如果是 URL
+                } else if (
+                    imageData.startsWith('http://') ||
+                    imageData.startsWith('https://')
+                ) {
                     setPredictionImage(imageData);
                 } else {
-                    // 假设是纯 base64，添加前缀
                     setPredictionImage(`data:image/png;base64,${imageData}`);
                 }
             } else {
-                console.log('⚠️ 后端响应中未找到图片数据');
                 setPredictionImage(null);
             }
 
-            // 在预测依据中显示后端签名（验证用）
-            const reason = data.reason || DEFAULT_REASON;
-            const reasonWithSignature = data.backend_signature
-                ? `${reason}\n\n[数据来源验证: ${data.backend_signature}]`
-                : reason;
-            setPredictionReason(reasonWithSignature);
+            setPredictionReason(data.reason || DEFAULT_REASON);
             setLastPredictionData(data);
             setPredictionStatus('completed');
             setShowExportOptions(true);
@@ -576,26 +562,34 @@ function App() {
         } catch (error) {
             console.error('预测失败:', error);
             setPredictionStatus('ready');
+            setShowExportOptions(false);
             showNotification('预测失败，请检查接口配置', 'error');
         }
     };
 
     const resetPrediction = () => {
+        const defaultSource = 'summer2021';
+        const series = buildSeriesFromDataset(defaultSource);
+
         setCurrentModel('lstm');
         setCurrentDepth('20');
-        setSelectedDate('2021-08-15');  // ← 改为2021年夏季（匹配默认数据源summer2021）
+        setSelectedDate('2021-08-15');
         setSelectedTime('14:00');
+        setCurrentDataSource(defaultSource);
+        setUseUpload(false);
+        setSelectedFileInfo(null);
+        setUploadedFileData(null);
         setPredictionStatus('ready');
         setShowExportOptions(false);
         setLastPredictionData(null);
-        setPredictionImage(null);  // 清除图片
+        setPredictionImage(null);
+        setChartSeries({ historical: series.historical, predicted: series.predicted });
+        setHumidityStats(series.stats);
+        setWaterAmount(series.waterAmount);
+        setPredictionReason(series.reason);
 
-        if (!useUpload) {
-            const series = buildSeriesFromDataset(currentDataSource);
-            setChartSeries({ historical: series.historical, predicted: series.predicted });
-            setHumidityStats(series.stats);
-            setWaterAmount(series.waterAmount);
-            setPredictionReason(series.reason);
+        if (fileInputRef.current) {
+            fileInputRef.current.value = '';
         }
     };
 
@@ -612,17 +606,18 @@ function App() {
         exportCanvas.height = 800;
         const ctx = exportCanvas.getContext('2d');
 
-        ctx.fillStyle = '#ffffff';
+        ctx.fillStyle = '#0B1120';
         ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
 
-        ctx.fillStyle = '#2e7d32';
+        ctx.fillStyle = '#F1F5F9';
         ctx.font = 'bold 28px Microsoft YaHei';
         ctx.textAlign = 'center';
         ctx.fillText('土壤湿度预测曲线', exportCanvas.width / 2, 60);
 
-        ctx.fillStyle = '#666';
+        ctx.fillStyle = '#94A3B8';
         ctx.font = '18px Microsoft YaHei';
-        ctx.fillText(`预测模型：${currentModelInfo.name} | 土壤深度：${currentDepth}cm | 预测时间：${formatDateToYYYYMMDD(optimalDate)} ${optimalTime}`,
+        ctx.fillText(
+            `预测模型：${currentModelInfo.name} | 土壤深度：${currentDepth}cm | 预测时间：${formatDateToYYYYMMDD(optimalDate)} ${optimalTime}`,
             exportCanvas.width / 2,
             100
         );
@@ -630,27 +625,19 @@ function App() {
         const chartImg = new Image();
         chartImg.onload = () => {
             ctx.drawImage(chartImg, 50, 150, 1100, 500);
-
             ctx.font = '16px Microsoft YaHei';
-            ctx.fillStyle = '#999';
+            ctx.fillStyle = '#94A3B8';
             ctx.textAlign = 'left';
             ctx.fillText(`导出时间：${new Date().toLocaleString('zh-CN')}`, 50, 700);
             ctx.textAlign = 'right';
             ctx.fillText('智慧农业灌溉平台', exportCanvas.width - 50, 700);
-
-            ctx.globalAlpha = 0.1;
-            ctx.font = 'bold 100px Microsoft YaHei';
-            ctx.fillStyle = '#2196f3';
-            ctx.textAlign = 'center';
-            ctx.fillText('预测报告', exportCanvas.width / 2, 400);
-            ctx.globalAlpha = 1.0;
 
             const dataURL = exportCanvas.toDataURL('image/png');
             link.download = `土壤湿度预测_${currentModelInfo.name}_${formatDateToYYYYMMDD(optimalDate).replace(/\//g, '-')}_${optimalTime}.png`;
             link.href = dataURL;
             link.click();
 
-            showNotification('PNG图片导出成功！', 'success');
+            showNotification('PNG 图片导出成功', 'success');
         };
 
         chartImg.src = canvas.toDataURL('image/png', 1.0);
@@ -665,11 +652,11 @@ function App() {
         const doc = new jsPDF();
 
         doc.setFontSize(20);
-        doc.setTextColor(46, 125, 50);
+        doc.setTextColor(11, 17, 32);
         doc.text('土壤湿度预测报告', 105, 20, { align: 'center' });
 
         doc.setFontSize(12);
-        doc.setTextColor(102, 102, 102);
+        doc.setTextColor(71, 85, 105);
         doc.text(`预测模型：${currentModelInfo.name}`, 20, 35);
         doc.text(`土壤深度：${currentDepth}cm`, 20, 42);
         doc.text(`预测时间：${formatDateToYYYYMMDD(optimalDate)} ${optimalTime}`, 20, 49);
@@ -679,56 +666,21 @@ function App() {
         doc.addImage(chartImage, 'JPEG', 20, 65, 170, 80);
 
         doc.setFontSize(14);
-        doc.setTextColor(46, 125, 50);
-        doc.text('预测数据详情', 20, 155);
+        doc.setTextColor(56, 189, 126);
+        doc.text('预测建议', 20, 155);
 
         doc.setFontSize(10);
-        doc.setTextColor(0, 0, 0);
-        doc.text('时间点', 20, 165);
-        doc.text('历史数据 (%)', 60, 165);
-        doc.text('预测数据 (%)', 110, 165);
-        doc.text('趋势', 160, 165);
-
-        const labels = ['D-3', 'D-2', 'D-1', 'D', 'D+1', 'D+2', 'D+3'];
-        const historicalData = chartInstanceRef.current?.data.datasets[0].data || [];
-        const predictedData = chartInstanceRef.current?.data.datasets[1].data || [];
-
-        let yPos = 172;
-        labels.forEach((label, index) => {
-            const historical = historicalData[index] !== null ? Number(historicalData[index]).toFixed(1) : '--';
-            const predicted = predictedData[index] !== null ? Number(predictedData[index]).toFixed(1) : '--';
-
-            let trend = '';
-            if (index < 3) {
-                trend = historicalData[index] > historicalData[index + 1] ? '↘ 下降' : '→ 平稳';
-            } else if (index >= 3) {
-                trend = '↘ 预测下降';
-            }
-
-            doc.text(label, 20, yPos);
-            doc.text(historical, 60, yPos);
-            doc.text(predicted, 110, yPos);
-            doc.text(trend, 160, yPos);
-
-            yPos += 7;
-        });
-
-        doc.setFontSize(14);
-        doc.setTextColor(46, 125, 50);
-        doc.text('预测建议', 20, yPos + 5);
-
-        doc.setFontSize(10);
-        doc.setTextColor(0, 0, 0);
+        doc.setTextColor(15, 23, 42);
         const splitReason = doc.splitTextToSize(predictionReason, 170);
-        doc.text(splitReason, 20, yPos + 15);
+        doc.text(splitReason, 20, 165);
 
         doc.setFontSize(8);
-        doc.setTextColor(153, 153, 153);
+        doc.setTextColor(148, 163, 184);
         doc.text(`导出时间：${new Date().toLocaleString('zh-CN')}`, 20, 280);
         doc.text('智慧农业灌溉平台', 180, 280, { align: 'right' });
 
         doc.save(`土壤湿度预测报告_${currentModelInfo.name}_${formatDateToYYYYMMDD(optimalDate).replace(/\//g, '-')}.pdf`);
-        showNotification('PDF文件导出成功！', 'success');
+        showNotification('PDF 文件导出成功', 'success');
     };
 
     const exportAsExcel = () => {
@@ -746,58 +698,22 @@ function App() {
         csvContent += `建议需水量,${waterAmount}\r\n`;
         csvContent += `预测依据,${predictionReason}\r\n`;
         csvContent += `导出时间,${new Date().toLocaleString('zh-CN')}\r\n\r\n`;
-
-        csvContent += '时间点,历史数据(%),预测数据(%),趋势分析\r\n';
+        csvContent += '时间点,历史数据(%),预测数据(%)\r\n';
 
         const labels = ['D-3', 'D-2', 'D-1', 'D', 'D+1', 'D+2', 'D+3'];
         const historicalData = chartInstanceRef.current.data.datasets[0].data;
         const predictedData = chartInstanceRef.current.data.datasets[1].data;
 
         labels.forEach((label, index) => {
-            const historical = historicalData[index] !== null ? Number(historicalData[index]).toFixed(1) : '--';
-            const predicted = predictedData[index] !== null ? Number(predictedData[index]).toFixed(1) : '--';
+            const historical = historicalData[index] !== null
+                ? Number(historicalData[index]).toFixed(1)
+                : '--';
+            const predicted = predictedData[index] !== null
+                ? Number(predictedData[index]).toFixed(1)
+                : '--';
 
-            let trend = '';
-            if (index < 3) {
-                if (historicalData[index] > historicalData[index + 1]) {
-                    trend = '下降趋势';
-                } else if (historicalData[index] < historicalData[index + 1]) {
-                    trend = '上升趋势';
-                } else {
-                    trend = '平稳';
-                }
-            } else if (index >= 3) {
-                trend = '预测值';
-            }
-
-            csvContent += `${label},${historical},${predicted},${trend}\r\n`;
+            csvContent += `${label},${historical},${predicted}\r\n`;
         });
-
-        csvContent += '\r\n统计信息\r\n';
-        csvContent += '数据项,数值\r\n';
-
-        const validHistoricalData = historicalData.filter((value) => value !== null);
-        const validPredictedData = predictedData.filter((value) => value !== null);
-
-        if (validHistoricalData.length > 0) {
-            const historicalAvg = (validHistoricalData.reduce((a, b) => a + b, 0) / validHistoricalData.length).toFixed(1);
-            const historicalMin = Math.min(...validHistoricalData).toFixed(1);
-            const historicalMax = Math.max(...validHistoricalData).toFixed(1);
-
-            csvContent += `历史数据平均值,${historicalAvg}%\r\n`;
-            csvContent += `历史数据最小值,${historicalMin}%\r\n`;
-            csvContent += `历史数据最大值,${historicalMax}%\r\n`;
-        }
-
-        if (validPredictedData.length > 0) {
-            const predictedAvg = (validPredictedData.reduce((a, b) => a + b, 0) / validPredictedData.length).toFixed(1);
-            const predictedMin = Math.min(...validPredictedData).toFixed(1);
-            const predictedMax = Math.max(...validPredictedData).toFixed(1);
-
-            csvContent += `预测数据平均值,${predictedAvg}%\r\n`;
-            csvContent += `预测数据最小值,${predictedMin}%\r\n`;
-            csvContent += `预测数据最大值,${predictedMax}%\r\n`;
-        }
 
         const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
         const link = document.createElement('a');
@@ -811,7 +727,7 @@ function App() {
         link.click();
         document.body.removeChild(link);
 
-        showNotification('Excel(CSV)文件导出成功！', 'success');
+        showNotification('Excel(CSV) 文件导出成功', 'success');
     };
 
     const predictionStatusText = {
@@ -822,32 +738,13 @@ function App() {
 
     const gridTransform = `rotateX(60deg) rotateZ(-45deg) scale(${gridScale})`;
     const soilParams = selectedPlot ? SOIL_PARAMS[selectedPlot] : null;
-    const soilDeficiencyClass = soilParams?.deficiency > 60 ? 'high-deficiency' : soilParams?.deficiency > 50 ? 'medium-deficiency' : '';
-    const soilDeficiencyText = soilParams?.deficiency > 60 ? ' (严重缺水)' : soilParams?.deficiency > 50 ? ' (缺水)' : '';
-
-    const waterValues = Object.values(IRRIGATION_PRESCRIPTION).map((item) => item.water);
-    const fertilizerValues = Object.values(IRRIGATION_PRESCRIPTION).map((item) => item.fertilizer);
-    const yieldValues = Object.values(YIELD_QUALITY_DATA).map((item) => item.yield);
-    const sugarValues = Object.values(YIELD_QUALITY_DATA).map((item) => item.sugar);
-
-    const minWater = Math.min(...waterValues);
-    const maxWater = Math.max(...waterValues);
-    const minFertilizer = Math.min(...fertilizerValues);
-    const maxFertilizer = Math.max(...fertilizerValues);
-    const minYield = Math.min(...yieldValues);
-    const maxYield = Math.max(...yieldValues);
-    const minSugar = Math.min(...sugarValues);
-    const maxSugar = Math.max(...sugarValues);
-
-    const quarter1 = minSugar + (maxSugar - minSugar) * 0.25;
-    const quarter2 = minSugar + (maxSugar - minSugar) * 0.5;
-    const quarter3 = minSugar + (maxSugar - minSugar) * 0.75;
 
     return (
         <AppView
-            // 状态
             activeTab={activeTab}
             setActiveTab={setActiveTab}
+            viewMode={viewMode}
+            setViewMode={setViewMode}
             currentModel={currentModel}
             currentDepth={currentDepth}
             selectedDate={selectedDate}
@@ -857,12 +754,9 @@ function App() {
             useUpload={useUpload}
             selectedFileInfo={selectedFileInfo}
             showExportOptions={showExportOptions}
-            showPanel={showPanel}
-            setShowPanel={setShowPanel}
             selectedPlot={selectedPlot}
-            gridScale={gridScale}
+            gridTransform={gridTransform}
             notification={notification}
-            irrigationStatus={irrigationStatus}
             plotStates={plotStates}
             optimalDate={optimalDate}
             optimalTime={optimalTime}
@@ -870,36 +764,19 @@ function App() {
             waterAmount={waterAmount}
             predictionReason={predictionReason}
             predictionImage={predictionImage}
-            // 计算值
             currentModelInfo={currentModelInfo}
             predictionStatusText={predictionStatusText}
-            gridTransform={gridTransform}
             soilParams={soilParams}
-            soilDeficiencyClass={soilDeficiencyClass}
-            soilDeficiencyText={soilDeficiencyText}
-            minWater={minWater}
-            maxWater={maxWater}
-            minFertilizer={minFertilizer}
-            maxFertilizer={maxFertilizer}
-            minYield={minYield}
-            maxYield={maxYield}
-            minSugar={minSugar}
-            maxSugar={maxSugar}
-            quarter1={quarter1}
-            quarter2={quarter2}
-            quarter3={quarter3}
-            // 事件处理函数
+            chartRef={chartRef}
+            fileInputRef={fileInputRef}
             handlePlotClick={handlePlotClick}
             handleZoomIn={handleZoomIn}
             handleZoomOut={handleZoomOut}
-            handleResetZoom={handleResetZoom}
             handleModelChange={handleModelChange}
             handleDepthChange={handleDepthChange}
             handleDateChange={handleDateChange}
             handleTimeChange={handleTimeChange}
             handleDataSourceChange={handleDataSourceChange}
-            handleToggleUpload={handleToggleUpload}
-            handleFiles={handleFiles}
             handleFileSelect={handleFileSelect}
             handleDrop={handleDrop}
             handlePrediction={handlePrediction}
@@ -908,10 +785,8 @@ function App() {
             exportAsPNG={exportAsPNG}
             exportAsPDF={exportAsPDF}
             exportAsExcel={exportAsExcel}
-            togglePanel={togglePanel}
-            // Refs
-            chartRef={chartRef}
-            fileInputRef={fileInputRef}
+            handleTriggerIrrigation={handleTriggerIrrigation}
+            hasPredictionResults={hasPredictionResults}
         />
     );
 }

@@ -40,3 +40,40 @@ export function getColorByValue(value, min, max, colorType = 'blue') {
 
     return '#e3f2fd';
 }
+
+/**
+ * 根据需水量映射灌溉处方颜色
+ * @param {number} water - 需水量，单位 L
+ * @returns {{fill: string, stroke: string, level: string}}
+ */
+export function getColorByWater(water) {
+    if (water <= 0.35) {
+        return {
+            fill: '#0A3D5C',
+            stroke: 'rgba(0, 229, 204, 0.4)',
+            level: '低需水'
+        };
+    }
+
+    if (water <= 0.55) {
+        return {
+            fill: '#0E5A80',
+            stroke: 'rgba(0, 180, 216, 0.28)',
+            level: '中低'
+        };
+    }
+
+    if (water <= 0.70) {
+        return {
+            fill: '#0077B6',
+            stroke: 'rgba(0, 119, 182, 0.3)',
+            level: '中高'
+        };
+    }
+
+    return {
+        fill: '#003D7A',
+        stroke: 'rgba(0, 61, 122, 0.34)',
+        level: '高需水'
+    };
+}
